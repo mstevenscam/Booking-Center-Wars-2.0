@@ -31,6 +31,7 @@ export interface GameViewCard {
   flavor: string;
   avatarGradient: string;
   iconName: string;
+  imageUrl?: string;          // Support for original scanned card artwork
   isExhausted?: boolean;
   isGuard?: boolean;
   isSilenced?: boolean;

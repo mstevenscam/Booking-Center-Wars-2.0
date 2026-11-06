@@ -88,8 +88,14 @@ export const BoardMinionTile: React.FC<BoardMinionTileProps> = ({
       `}>
         {/* Minion Artwork Portrait */}
         <div className={`relative w-full h-[62%] bg-gradient-to-br ${card.avatarGradient} flex items-center justify-center overflow-hidden border-b-2 border-slate-700/80`}>
-          <div className="absolute inset-0 opacity-20 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:6px_6px]" />
-          <IconComp className="w-10 sm:w-12 h-10 sm:h-12 text-white drop-shadow-[0_4px_8px_rgba(0,0,0,0.8)] transform group-hover:scale-115 transition-transform duration-300" />
+          {card.imageUrl ? (
+            <img src={card.imageUrl} alt={card.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+          ) : (
+            <>
+              <div className="absolute inset-0 opacity-20 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:6px_6px]" />
+              <IconComp className="w-10 sm:w-12 h-10 sm:h-12 text-white drop-shadow-[0_4px_8px_rgba(0,0,0,0.8)] transform group-hover:scale-115 transition-transform duration-300" />
+            </>
+          )}
           
           {/* Option A Stamina Buffer Ring Halo */}
           {hasBuffer && (

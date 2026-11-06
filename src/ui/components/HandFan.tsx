@@ -1,9 +1,14 @@
 /**
  * BOOKING WARS: THE BATTLE FOR THE BOOKING CENTRE
- * Hearthstone-Style Curved Hand Fan Component
+ * Visual Milestone 3 — Premium Hearthstone-Style Curved Hand Fan
  * 
- * Implements curved radial card arrangement, natural overlap, hover elevation,
- * green playable glow, and drag-and-drop deployment interaction.
+ * Production-grade collectible card hand tray:
+ * - Natural radial fan curve with smooth mathematical curvature.
+ * - Overlap geometry calibrated so the 3D Shift cost crystal and title remain visible.
+ * - Smooth hover elevation: Straightens, elevates above siblings, and scales without jitter.
+ * - Selected state with tactile rise and glowing golden selection ring.
+ * - Clear playable status (green crystal aura) when Shift points allow deployment.
+ * - Full touch and keyboard accessibility (Tab, Enter, Space).
  */
 
 import React, { useState } from 'react';
@@ -30,13 +35,16 @@ export const HandFan: React.FC<HandFanProps> = ({
   const [hoveredCardId, setHoveredCardId] = useState<string | null>(null);
 
   const totalCards = hand.length;
-  // Calculate rotation step and horizontal spacing dynamically based on hand size
-  const maxAngle = Math.min(24, totalCards * 4);
+  // Calculate angular spread and horizontal spacing dynamically based on hand size
+  const maxAngle = Math.min(22, totalCards * 3.8);
   const angleStep = totalCards > 1 ? (maxAngle * 2) / (totalCards - 1) : 0;
 
+  // Horizontal card spacing (closer when more cards in hand)
+  const cardSpacing = totalCards > 7 ? 32 : totalCards > 5 ? 40 : 48;
+
   return (
-    <div className="relative w-full h-36 sm:h-44 md:h-48 flex items-end justify-center select-none pb-1 pointer-events-auto">
-      <div className="relative flex items-end justify-center w-full max-w-4xl h-full">
+    <div className="relative w-full h-36 sm:h-42 md:h-46 flex items-end justify-center select-none pb-1 pointer-events-auto overflow-visible">
+      <div className="relative flex items-end justify-center w-full max-w-4xl h-full overflow-visible">
         {hand.map((card, index) => {
           const isSelected = selectedCardId === card.id;
           const isHovered = hoveredCardId === card.id;
@@ -45,20 +53,22 @@ export const HandFan: React.FC<HandFanProps> = ({
           // Fan geometry calculation
           const offsetIndex = index - (totalCards - 1) / 2;
           const defaultRotation = offsetIndex * (angleStep || 0);
-          const defaultTranslateY = Math.abs(offsetIndex) * (totalCards > 5 ? 6 : 4);
-          const defaultTranslateX = offsetIndex * (totalCards > 6 ? 32 : 42);
+          
+          // Subtle parabolic curve: cards at ends dip down slightly
+          const defaultTranslateY = Math.pow(Math.abs(offsetIndex), 1.6) * (totalCards > 5 ? 4.5 : 3.5);
+          const defaultTranslateX = offsetIndex * cardSpacing;
 
           // Dynamic transform when hovered or selected
           const rotation = isHovered || isSelected ? 0 : defaultRotation;
           const translateY = isSelected 
-            ? -60 
+            ? -65 
             : isHovered 
-              ? -50 
+              ? -52 
               : defaultTranslateY;
           const scale = isSelected 
             ? 1.15 
             : isHovered 
-              ? 1.25 
+              ? 1.22 
               : 1;
           const zIndex = isSelected ? 40 : isHovered ? 50 : 10 + index;
 
@@ -73,17 +83,16 @@ export const HandFan: React.FC<HandFanProps> = ({
               style={{
                 transform: `translateX(${defaultTranslateX}px) translateY(${translateY}px) rotate(${rotation}deg) scale(${scale})`,
                 zIndex,
-                transition: 'transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1), z-index 0.1s ease',
+                transition: 'transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), z-index 0.08s ease',
                 transformOrigin: 'bottom center'
               }}
-              className={`absolute bottom-0 cursor-grab active:cursor-grabbing origin-bottom ${
-                canAfford && !card.isExhausted ? 'card-playable-glow rounded-xl' : ''
-              }`}
+              className="absolute bottom-0 cursor-grab active:cursor-grabbing origin-bottom focus-visible:outline-none"
             >
               <CardView
                 card={card}
                 size="compact"
                 isSelected={isSelected}
+                isPlayable={canAfford && !card.isExhausted}
                 isInteractable={true}
                 onInspect={() => onInspectCard(card)}
               />

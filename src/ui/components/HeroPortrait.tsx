@@ -42,10 +42,11 @@ export const HeroPortrait: React.FC<HeroPortraitProps> = ({
       onClick={canBeDirectlyAttacked ? onDirectAttack : undefined}
       title={canBeDirectlyAttacked ? 'Tap to declare direct strike on Supervisor!' : `${player.name} (${player.title})`}
     >
-      {/* Floating Damage Popup on Hero */}
+      {/* Floating Damage Popup on Hero (Clearly labeled as mock demo prediction) */}
       {damagePopupText && (
-        <div className="absolute -top-5 left-1/2 transform -translate-x-1/2 z-50 px-3 py-1 rounded-full bg-rose-600 text-white font-black text-xs sm:text-sm shadow-2xl border-2 border-rose-300 anim-float-damage whitespace-nowrap">
-          {damagePopupText}
+        <div className="absolute -top-6 left-1/2 transform -translate-x-1/2 z-50 px-3 py-1 rounded-full bg-rose-600 text-white font-black text-xs shadow-2xl border-2 border-rose-300 anim-float-damage whitespace-nowrap flex flex-col items-center leading-none">
+          <span>{damagePopupText}</span>
+          <span className="text-[7px] text-amber-200 uppercase font-mono tracking-wider mt-0.5">EST. (MOCK DEMO)</span>
         </div>
       )}
 

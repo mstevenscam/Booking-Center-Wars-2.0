@@ -99,6 +99,7 @@ export const BattlefieldScreen: React.FC<BattlefieldScreenProps> = ({
 
   const containerRef = useRef<HTMLDivElement>(null);
   const attackerSlotRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const lastAttackTimestampRef = useRef<number>(0);
 
   const selectedHandCard = state.player.hand.find(c => c.id === selectedHandCardId) || null;
   const isActionPhase = state.activePhase === 'OPERATIONAL_ACTION';
@@ -118,7 +119,7 @@ export const BattlefieldScreen: React.FC<BattlefieldScreenProps> = ({
     setDamagePopups(prev => [...prev, { id: popupId, targetKey, text, isBuffer }]);
     setTimeout(() => {
       setDamagePopups(prev => prev.filter(p => p.id !== popupId));
-    }, 1200);
+    }, 1400);
   };
 
   // Unified Pointer Targeting: Tracking pointer move, up, and cancel across window
@@ -197,6 +198,12 @@ export const BattlefieldScreen: React.FC<BattlefieldScreenProps> = ({
 
   // Resolve attack on opponent minion
   const handleAttackOpponentMinion = (targetSlotIndex: number) => {
+    const now = Date.now();
+    // Guard against duplicate execution from pointerup followed by synthetic click
+    if (now - lastAttackTimestampRef.current < 450) {
+      return;
+    }
+
     if (selectedAttackerSlot === null) return;
     if (!isActionPhase) {
       showToast('Attacks can only be declared during the Operational Action phase.');
@@ -227,6 +234,7 @@ export const BattlefieldScreen: React.FC<BattlefieldScreenProps> = ({
       return;
     }
 
+    lastAttackTimestampRef.current = now;
     const currentAttackerSlot = selectedAttackerSlot;
     // Execute mock action first
     const success = onExecuteAttack(currentAttackerSlot, targetSlotIndex);
@@ -240,7 +248,7 @@ export const BattlefieldScreen: React.FC<BattlefieldScreenProps> = ({
       return;
     }
 
-    // Trigger visual feedback only after acceptance
+    // Trigger visual feedback only after acceptance (Identified clearly as mock demo feedback)
     setAnimatingAttackerSlot(currentAttackerSlot);
     const targetKey = `opp-${targetSlotIndex}`;
     setImpactedSlotKey(targetKey);
@@ -274,6 +282,12 @@ export const BattlefieldScreen: React.FC<BattlefieldScreenProps> = ({
 
   // Resolve direct attack on opponent hero
   const handleAttackOpponentHero = () => {
+    const now = Date.now();
+    // Guard against duplicate execution: pointerup followed by synthetic click on HeroPortrait
+    if (now - lastAttackTimestampRef.current < 450) {
+      return;
+    }
+
     if (selectedAttackerSlot === null) return;
     if (!isActionPhase) {
       showToast('Direct strikes can only be declared during the Operational Action phase.');
@@ -295,6 +309,7 @@ export const BattlefieldScreen: React.FC<BattlefieldScreenProps> = ({
       return;
     }
 
+    lastAttackTimestampRef.current = now;
     const currentAttackerSlot = selectedAttackerSlot;
     const success = onExecuteAttack(currentAttackerSlot, 'SUPERVISOR');
     
@@ -315,7 +330,7 @@ export const BattlefieldScreen: React.FC<BattlefieldScreenProps> = ({
       setAnimatingAttackerSlot(null);
       setImpactedSlotKey(null);
       setSelectedAttackerSlot(null);
-      showToast('Direct strike registered on Supervisor Morale!');
+      showToast('Direct strike registered on Supervisor Morale! (Demo Feedback)');
     }, 450);
   };
 
@@ -500,12 +515,13 @@ export const BattlefieldScreen: React.FC<BattlefieldScreenProps> = ({
                         : 'border-dashed border-slate-800/60 bg-slate-950/30'
                     } ${impactedSlotKey === slotKey ? 'anim-impact-flash' : ''}`}
                   >
-                    {/* Floating Damage Popup */}
+                    {/* Floating Damage Popup (Identified as mock demo feedback) */}
                     {damagePopup && (
-                      <div className={`absolute -top-3 z-50 px-2.5 py-0.5 rounded-full font-black text-xs shadow-xl border anim-float-damage ${
+                      <div className={`absolute -top-4 z-50 px-2 py-0.5 rounded-full font-black text-[9.5px] shadow-xl border anim-float-damage flex flex-col items-center leading-none ${
                         damagePopup.isBuffer ? 'bg-cyan-600 text-white border-cyan-300' : 'bg-red-600 text-white border-red-300'
                       }`}>
-                        {damagePopup.text}
+                        <span>{damagePopup.text}</span>
+                        <span className="text-[6.5px] uppercase font-mono tracking-wider opacity-90 mt-0.5">EST. (MOCK DEMO)</span>
                       </div>
                     )}
 
@@ -599,10 +615,11 @@ export const BattlefieldScreen: React.FC<BattlefieldScreenProps> = ({
                           : 'border-dashed border-slate-800/60 bg-slate-950/30 hover:border-slate-700'
                     }`}
                   >
-                    {/* Floating Damage Popup on Friendly Unit */}
+                    {/* Floating Damage Popup on Friendly Unit (Identified as mock demo feedback) */}
                     {damagePopup && (
-                      <div className="absolute -top-3 z-50 px-2.5 py-0.5 rounded-full bg-red-600 text-white font-black text-xs shadow-xl border border-red-300 anim-float-damage">
-                        {damagePopup.text}
+                      <div className="absolute -top-4 z-50 px-2 py-0.5 rounded-full bg-red-600 text-white font-black text-[9.5px] shadow-xl border border-red-300 anim-float-damage flex flex-col items-center leading-none">
+                        <span>{damagePopup.text}</span>
+                        <span className="text-[6.5px] uppercase font-mono tracking-wider opacity-90 mt-0.5">EST. (MOCK DEMO)</span>
                       </div>
                     )}
 
@@ -675,15 +692,17 @@ export const BattlefieldScreen: React.FC<BattlefieldScreenProps> = ({
 
         {/* Hearthstone-Style Curved Fanned Hand (Center Bottom) */}
         <div className="flex-1 flex flex-col items-center justify-end max-w-2xl mx-auto w-full">
-          {/* Quick Spell Cast Banner if Incident/Policy selected */}
-          {selectedHandCard && (selectedHandCard.cardType === 'INCIDENT' || selectedHandCard.cardType === 'POLICY') && (
+          {/* Quick Cast / Authorization Banner if Incident, Equipment, or Policy selected */}
+          {selectedHandCard && (selectedHandCard.cardType === 'INCIDENT' || selectedHandCard.cardType === 'POLICY' || selectedHandCard.cardType === 'EQUIPMENT') && (
             <div className="mb-2 z-40">
               <button
                 onClick={() => handleCastSpellCard(selectedHandCard)}
                 className="px-4 py-1.5 rounded-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-2xl flex items-center gap-1.5 border-2 border-amber-200 animate-bounce cursor-pointer"
               >
                 <Zap className="w-4 h-4 fill-slate-950" />
-                <span>AUTHORIZE {selectedHandCard.name} ({selectedHandCard.shiftCost} SHIFT)</span>
+                <span>
+                  {selectedHandCard.cardType === 'EQUIPMENT' ? 'EQUIP' : 'AUTHORIZE'} {selectedHandCard.name} ({selectedHandCard.shiftCost} SHIFT)
+                </span>
               </button>
             </div>
           )}

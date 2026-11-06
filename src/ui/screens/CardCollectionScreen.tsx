@@ -140,6 +140,21 @@ export const CardCollectionScreen: React.FC = () => {
               </button>
             ))}
           </div>
+
+          {/* Card Type (Character, Incident, Equipment, Policy) */}
+          <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800">
+            {(['ALL', 'CHARACTER', 'INCIDENT', 'EQUIPMENT', 'POLICY'] as const).map((ctype) => (
+              <button
+                key={ctype}
+                onClick={() => setSelectedType(ctype)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${
+                  selectedType === ctype ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {ctype === 'ALL' ? 'ALL TYPES' : ctype}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
