@@ -1,0 +1,125 @@
+/**
+ * BOOKING WARS: THE BATTLE FOR THE BOOKING CENTRE
+ * Milestone 4 — Physical Card Archive, Google Drive Integration & Import Centre
+ * 
+ * Strict Domain Model:
+ * 1. HistoricalCardArchive: Represents permanent archival preservation of original
+ *    physical card scans (.jpg, .png, .webp, .tif) and Photoshop templates (.psd).
+ * 2. PlayableCardDefinition: Represents mutable digital playable cards that reference
+ *    an archive record, supporting multiple playable variations per historical scan.
+ */
+
+import { Department, CardRarity, CardType } from '../types';
+
+export type ArchiveClassification = 
+  | 'CARD_ARTWORK'         // Original scan of physical cards
+  | 'PHOTOSHOP_TEMPLATE'   // Master .psd template file
+  | 'OTHER_ASSET';         // Rulebooks, sketches, promo collateral
+
+export type ArchiveSourceProvider = 
+  | 'GOOGLE_DRIVE' 
+  | 'LOCAL_UPLOAD';
+
+export interface HistoricalCardArchive {
+  archiveId: string;                   // Stable unique ID, e.g. "arc-2022-sarah-cable-9f82a1"
+  originalFileName: string;            // Exact original filename
+  originalFileType: string;            // MIME type (e.g. "image/jpeg", "image/vnd.adobe.photoshop")
+  originalFileSize: number;            // Size in bytes
+  originalFileChecksum: string;        // Cryptographic SHA-256 hash of file content
+  originalCreationYear: number | null; // e.g. 2018, 2021, 2022, 2023
+  sourceProvider: ArchiveSourceProvider;
+  sourceFolderPath: string | null;     // e.g. "Humber Booking Centre Archive/2022 Scans"
+  sourceDriveFileId: string | null;    // Google Drive file ID if imported via Drive
+  importedAt: string;                  // ISO timestamp
+  classification: ArchiveClassification;
+  userNotes: string | null;
+  derivedThumbnailId?: string | null;
+  metadata?: {
+    photoshopLayersDetected?: boolean;
+    dimensions?: { width: number; height: number };
+    aiSuggestedTitle?: string;
+    aiSuggestedDepartment?: Department;
+    aiExtractedFlavor?: string;
+  };
+}
+
+export interface PlayableCardDefinition {
+  playableCardId: string;              // e.g. "play-sarah-cable-v1"
+  archiveId: string | null;            // References HistoricalCardArchive.archiveId (null for pure digital cards)
+  displayName: string;
+  variationName: string;               // e.g. "Standard Roster", "Alt-Art Promo", "Tournament Foil"
+  cardType: CardType;
+  rarity: CardRarity;
+  department: Department;
+  shiftCost: number;
+  efficiency: number;                  // Combat efficiency (power)
+  stamina: number;                     // Base stamina
+  maxStamina: number;
+  influence: number;                   // Queue and terminal victory points
+  keywords: string[];
+  abilityName: string | null;
+  abilityDesc: string | null;
+  flavor: string;
+  avatarGradient?: string;
+  iconName?: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ImportBatchItem {
+  id: string;
+  file: Blob | File;
+  name: string;
+  type: string;
+  size: number;
+  checksum: string;
+  creationYear: number | null;
+  sourceFolderPath: string | null;
+  sourceDriveFileId: string | null;
+  sourceProvider: ArchiveSourceProvider;
+  classification: ArchiveClassification;
+  previewUrl: string | null;
+  isDuplicate: boolean;
+  duplicateReason?: string;
+  matchedArchiveId?: string;
+  status: 'PENDING' | 'IMPORTING' | 'SUCCESS' | 'ERROR';
+  error?: string;
+}
+
+export interface ArchiveFilterOptions {
+  searchQuery: string;
+  year: number | 'ALL';
+  classification: ArchiveClassification | 'ALL';
+  sourceProvider: ArchiveSourceProvider | 'ALL';
+  hasPlayableVariation: boolean | 'ALL';
+  sortBy: 'NAME' | 'YEAR_DESC' | 'YEAR_ASC' | 'IMPORT_DATE_DESC' | 'SIZE_DESC';
+}
+
+export interface ArchiveExportBundle {
+  version: number;
+  exportedAt: string;
+  records: HistoricalCardArchive[];
+  playableCards: PlayableCardDefinition[];
+  assets: {
+    archiveId: string;
+    originalFileName: string;
+    mimeType: string;
+    base64Data: string;
+  }[];
+}
+
+export interface DriveFolderInfo {
+  id: string;
+  name: string;
+  year?: number | null;
+}
+
+export interface DriveFileItem {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  createdTime?: string;
+  folderPath?: string;
+}

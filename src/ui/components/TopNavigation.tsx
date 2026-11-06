@@ -9,6 +9,7 @@ import {
   Menu, 
   Layers, 
   BookOpen, 
+  Archive,
   Settings, 
   Terminal, 
   RefreshCw,
@@ -36,6 +37,7 @@ export const TopNavigation: React.FC<TopNavigationProps> = ({
     { screen: 'MAIN_MENU', label: 'Main Menu', icon: Menu },
     { screen: 'DECK_BUILDER', label: 'Deck Builder', icon: Layers },
     { screen: 'COLLECTION', label: 'Card Collection', icon: BookOpen },
+    { screen: 'ARCHIVE', label: 'Card Archive', icon: Archive },
     { screen: 'SETTINGS', label: 'Settings', icon: Settings },
     { screen: 'COMMAND_CENTER', label: 'Rules & Architecture', icon: Terminal },
   ];

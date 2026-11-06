@@ -116,5 +116,6 @@ export type VisualScreenType =
   | 'MAIN_MENU'
   | 'DECK_BUILDER'
   | 'COLLECTION'
+  | 'ARCHIVE'
   | 'SETTINGS'
   | 'COMMAND_CENTER';

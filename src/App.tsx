@@ -20,6 +20,7 @@ import { BattlefieldScreen } from './ui/screens/BattlefieldScreen';
 import { MainMenuScreen } from './ui/screens/MainMenuScreen';
 import { DeckBuilderScreen } from './ui/screens/DeckBuilderScreen';
 import { CardCollectionScreen } from './ui/screens/CardCollectionScreen';
+import { CardArchiveScreen } from './ui/screens/CardArchiveScreen';
 import { SettingsScreen } from './ui/screens/SettingsScreen';
 import { CommandCenterScreen } from './ui/screens/CommandCenterScreen';
 
@@ -96,6 +97,10 @@ export default function App() {
 
         {activeScreen === 'COLLECTION' && (
           <CardCollectionScreen />
+        )}
+
+        {activeScreen === 'ARCHIVE' && (
+          <CardArchiveScreen />
         )}
 
         {activeScreen === 'SETTINGS' && (
