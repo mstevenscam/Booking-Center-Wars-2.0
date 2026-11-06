@@ -1,0 +1,6 @@
+{
+  "name": "Booking Wars: The Battle for the Booking Centre",
+  "description": "An original, strategic, turn-based digital collectible trading card game set in an exaggerated fictional Humber College Booking Centre.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
