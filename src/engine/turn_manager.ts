@@ -133,43 +133,34 @@ export function executeShiftStart(
   }
   events.push(`All friendly battlefield units set to Ready.`);
 
-  resetAbilityExecutionBudget();
-  const startRes = dispatchTriggers(state, 'START_OF_SHIFT', {
-    trigger: 'START_OF_SHIFT',
-    sourceInstanceId: '',
-    sourcePlayerId: active.id
-  });
-  events.push(...startRes.events);
-
-  if (startRes.pendingDecisionCreated || state.pendingDecision !== null || (state.pendingTriggerQueue && state.pendingTriggerQueue.length > 0)) {
-    const serializedTriage = triageDecisions ? Array.from(triageDecisions.entries()) : undefined;
-    state.pendingContinuation = {
-      type: 'CONTINUE_SHIFT_START',
-      playerId: active.id,
-      stage: 'AWAITING_START_OF_SHIFT',
-      triageDecisions: serializedTriage
-    };
-    state.historyLog.push(...events);
-    return {
-      phase: 'SHIFT_START',
-      playerId: state.activePlayerId,
-      turn: state.currentTurn,
-      events
-    };
-  }
-
-  return completeShiftStartAfterTriggers(state, events, triageDecisions);
+  // Canonical Phase 1 order: ready units, resolve queue arrivals/triage,
+  // then dispatch START_OF_SHIFT abilities. Queue resolution owns the
+  // continuation until every arrival and its ON_DEPLOY triggers are complete.
+  return resolveQueueResolution(state, events, false, triageDecisions);
 }
 
 /**
- * Completes Phase 1 queue decrement, capacity triage, and State-Based Actions sweep after START_OF_SHIFT triggers finish.
+ * Finalizes Phase 1 after START_OF_SHIFT triggers finish; queue processing has already completed.
  */
 export function completeShiftStartAfterTriggers(
   state: GameState,
   accumulatedEvents: string[] = [],
-  triageDecisions?: Map<string, TriageDecision>
+  _triageDecisions?: Map<string, TriageDecision>
 ): TurnExecutionLog {
-  return resolveQueueResolution(state, accumulatedEvents, false, triageDecisions);
+  // This continuation is reached only after START_OF_SHIFT abilities finish.
+  // Queue countdown and ticket resolution have already completed and must not repeat.
+  const events = accumulatedEvents;
+  evaluateStateBasedActions(state);
+  if (state.status !== 'COMPLETED') {
+    state.currentPhase = 'SHIFT_BUDGETING';
+  }
+  state.historyLog.push(...events);
+  return {
+    phase: 'SHIFT_START',
+    playerId: state.activePlayerId,
+    turn: state.currentTurn,
+    events
+  };
 }
 
 /**
@@ -320,6 +311,46 @@ export function resolveQueueResolution(
           const retired = active.battlefield.splice(boardIdx, 1)[0].card;
           retired.currentZone = 'BREAKROOM';
           active.breakroom.push(retired);
+
+          // Retirement is a real departure from the battlefield. Resolve its
+          // ON_CLOCK_OUT reactions before the arriving ticket is deployed.
+          const retireRes = dispatchTriggers(state, 'ON_CLOCK_OUT', {
+            trigger: 'ON_CLOCK_OUT',
+            sourceInstanceId: retired.instanceId,
+            sourcePlayerId: active.id,
+            departingCard: retired
+          });
+          events.push(...retireRes.events);
+
+          if (isOperationSuspended(state)) {
+            const serializedTriage = triageDecisions ? Array.from(triageDecisions.entries()) : undefined;
+            state.pendingContinuation = {
+              type: 'CONTINUE_QUEUE_RESOLUTION',
+              playerId: active.id,
+              stage: 'RESOLVING_TICKETS',
+              countdownDecremented: true,
+              triageDecisions: serializedTriage
+            };
+            state.historyLog.push(...events);
+            return {
+              phase: 'SHIFT_START',
+              playerId: state.activePlayerId,
+              turn: state.currentTurn,
+              events
+            };
+          }
+
+          // A retirement trigger may end the match. Do not deploy the queued
+          // arrival or process further tickets after a completed match.
+          if (state.status === 'COMPLETED') {
+            state.historyLog.push(...events);
+            return {
+              phase: 'SHIFT_START',
+              playerId: state.activePlayerId,
+              turn: state.currentTurn,
+              events
+            };
+          }
 
           active.queue.splice(queueIdx, 1);
           state.instanceCounter = (state.instanceCounter || 0) + 1;
@@ -475,7 +506,40 @@ export function resolveQueueResolution(
     }
   }
 
+  // Queue processing (including every ON_DEPLOY reaction) is complete.
+  // START_OF_SHIFT triggers are deliberately dispatched afterwards, matching
+  // the canonical five-phase rules sequence.
+  if (state.pendingDecision === null && (!state.pendingTriggerQueue || state.pendingTriggerQueue.length === 0)) {
+    resetAbilityExecutionBudget();
+    const startRes = dispatchTriggers(state, 'START_OF_SHIFT', {
+      trigger: 'START_OF_SHIFT',
+      sourceInstanceId: '',
+      sourcePlayerId: active.id
+    });
+    events.push(...startRes.events);
+
+    if (startRes.pendingDecisionCreated || state.pendingDecision !== null || (state.pendingTriggerQueue && state.pendingTriggerQueue.length > 0)) {
+      state.pendingContinuation = {
+        type: 'CONTINUE_SHIFT_START',
+        playerId: active.id,
+        stage: 'AWAITING_START_OF_SHIFT'
+      };
+      state.historyLog.push(...events);
+      return {
+        phase: 'SHIFT_START',
+        playerId: state.activePlayerId,
+        turn: state.currentTurn,
+        events
+      };
+    }
+  }
+
   evaluateStateBasedActions(state);
+  if (state.status !== 'COMPLETED' && !isOperationSuspended(state)) {
+    // Also handles completion through RESOLVE_TRIAGE or a resumed queue trigger,
+    // where advanceToNextPhase is not on the current call stack.
+    state.currentPhase = 'SHIFT_BUDGETING';
+  }
   state.historyLog.push(...events);
 
   return {

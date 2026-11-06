@@ -750,7 +750,8 @@ export function executeAction(state: GameState, action: GameEngineAction): Actio
             evaluateStateBasedActions(state, execContext);
           }
         } else if (cont.type === 'CONTINUE_COMBAT') {
-          state.pendingContinuation = null;
+          // completeSuspendedCombat owns the persisted stage and clears the
+          // continuation only after all damage reactions and SBAs are complete.
           const combatRes = completeSuspendedCombat(
             state,
             cont.attackerInstanceId,
