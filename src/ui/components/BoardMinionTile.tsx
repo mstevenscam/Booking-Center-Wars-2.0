@@ -28,7 +28,7 @@ interface BoardMinionTileProps {
   isTargetable?: boolean;
   onClick?: () => void;
   onInspect?: () => void;
-  onDragStartAttack?: (e: React.MouseEvent | React.TouchEvent) => void;
+  onPointerDownAttack?: (e: React.PointerEvent) => void;
   animationClass?: string;
 }
 
@@ -40,7 +40,7 @@ export const BoardMinionTile: React.FC<BoardMinionTileProps> = ({
   isTargetable = false,
   onClick,
   onInspect,
-  onDragStartAttack,
+  onPointerDownAttack,
   animationClass = ''
 }) => {
   const [showTooltip, setShowTooltip] = useState(false);
@@ -55,8 +55,7 @@ export const BoardMinionTile: React.FC<BoardMinionTileProps> = ({
       onMouseEnter={() => setShowTooltip(true)}
       onMouseLeave={() => setShowTooltip(false)}
       onClick={onClick}
-      onMouseDown={canAttack ? onDragStartAttack : undefined}
-      onTouchStart={canAttack ? onDragStartAttack : undefined}
+      onPointerDown={canAttack ? onPointerDownAttack : undefined}
       onContextMenu={(e) => {
         e.preventDefault();
         if (onInspect) onInspect();

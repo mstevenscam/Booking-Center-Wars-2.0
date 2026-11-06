@@ -55,7 +55,7 @@ export interface QueueTicketView {
 export type TurnPhase = 
   | 'SHIFT_START' 
   | 'SHIFT_BUDGETING' 
-  | 'ADMIN_DRAW' 
+  | 'ADMINISTRATIVE_DRAW' 
   | 'OPERATIONAL_ACTION' 
   | 'CLOCK_OUT';
 

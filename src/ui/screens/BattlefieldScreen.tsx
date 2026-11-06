@@ -121,31 +121,67 @@ export const BattlefieldScreen: React.FC<BattlefieldScreenProps> = ({
     }, 1200);
   };
 
-  // Targeting arrow mouse move tracking
+  // Unified Pointer Targeting: Tracking pointer move, up, and cancel across window
   useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (isAimingAttack) {
-        setArrowEnd({ x: e.clientX, y: e.clientY });
+    if (!isAimingAttack) return;
+
+    const handlePointerMove = (e: PointerEvent) => {
+      setArrowEnd({ x: e.clientX, y: e.clientY });
+
+      // Detect element under pointer
+      const elem = document.elementFromPoint(e.clientX, e.clientY);
+      const opponentSlotElem = elem?.closest('[data-opponent-slot]');
+      const opponentHeroElem = elem?.closest('[data-opponent-hero]');
+
+      if (opponentHeroElem) {
+        setIsOverValidTarget(!opponentHasGuards);
+      } else if (opponentSlotElem) {
+        const slotIdx = Number(opponentSlotElem.getAttribute('data-opponent-slot'));
+        const slot = state.opponent.battlefield.find(s => s.slotIndex === slotIdx);
+        const valid = Boolean(slot?.character && (!opponentHasGuards || slot.character.isGuard));
+        setIsOverValidTarget(valid);
+      } else {
+        setIsOverValidTarget(false);
       }
     };
 
-    const handleMouseUp = () => {
-      if (isAimingAttack) {
+    const handlePointerUp = (e: PointerEvent) => {
+      const elem = document.elementFromPoint(e.clientX, e.clientY);
+      const opponentSlotElem = elem?.closest('[data-opponent-slot]');
+      const opponentHeroElem = elem?.closest('[data-opponent-hero]');
+
+      if (opponentHeroElem) {
+        handleAttackOpponentHero();
+      } else if (opponentSlotElem) {
+        const slotIdx = Number(opponentSlotElem.getAttribute('data-opponent-slot'));
+        handleAttackOpponentMinion(slotIdx);
+      } else {
+        // Released over empty board or cancelled
         setIsAimingAttack(false);
         setArrowStart(null);
+        setSelectedAttackerSlot(null);
       }
     };
 
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+    const handlePointerCancel = () => {
+      setIsAimingAttack(false);
+      setArrowStart(null);
+      setSelectedAttackerSlot(null);
     };
-  }, [isAimingAttack]);
 
-  // Initiate attack aiming from player minion
-  const handleStartAttackAim = (slotIndex: number, e: React.MouseEvent | React.TouchEvent) => {
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerCancel);
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerCancel);
+    };
+  }, [isAimingAttack, opponentHasGuards, state.opponent.battlefield, selectedAttackerSlot, isActionPhase]);
+
+  // Initiate attack aiming from player minion (Pointer event)
+  const handleStartAttackAim = (slotIndex: number, e: React.PointerEvent) => {
     if (!isActionPhase) {
       showToast('Attacks can only be declared during the Operational Action phase.');
       return;
@@ -155,11 +191,8 @@ export const BattlefieldScreen: React.FC<BattlefieldScreenProps> = ({
 
     setSelectedAttackerSlot(slotIndex);
     setIsAimingAttack(true);
-
-    const clientX = 'clientX' in e ? e.clientX : e.touches[0].clientX;
-    const clientY = 'clientY' in e ? e.clientY : e.touches[0].clientY;
-    setArrowStart({ x: clientX, y: clientY });
-    setArrowEnd({ x: clientX, y: clientY });
+    setArrowStart({ x: e.clientX, y: e.clientY });
+    setArrowEnd({ x: e.clientX, y: e.clientY });
   };
 
   // Resolve attack on opponent minion
@@ -167,30 +200,48 @@ export const BattlefieldScreen: React.FC<BattlefieldScreenProps> = ({
     if (selectedAttackerSlot === null) return;
     if (!isActionPhase) {
       showToast('Attacks can only be declared during the Operational Action phase.');
+      setIsAimingAttack(false);
+      setArrowStart(null);
       return;
     }
 
     const targetSlot = state.opponent.battlefield.find(s => s.slotIndex === targetSlotIndex);
-    if (!targetSlot?.character) return;
+    if (!targetSlot?.character) {
+      setIsAimingAttack(false);
+      setArrowStart(null);
+      return;
+    }
 
     if (opponentHasGuards && !targetSlot.character.isGuard) {
       showToast('Front Desk Guard active! You must engage the Guard first.');
+      setIsAimingAttack(false);
+      setArrowStart(null);
       return;
     }
 
     const attackerCard = state.player.battlefield.find(s => s.slotIndex === selectedAttackerSlot)?.character;
     const defenderCard = targetSlot.character;
-    if (!attackerCard) return;
+    if (!attackerCard) {
+      setIsAimingAttack(false);
+      setArrowStart(null);
+      return;
+    }
 
+    const currentAttackerSlot = selectedAttackerSlot;
     // Execute mock action first
-    const success = onExecuteAttack(selectedAttackerSlot, targetSlotIndex);
+    const success = onExecuteAttack(currentAttackerSlot, targetSlotIndex);
+    
+    setIsAimingAttack(false);
+    setArrowStart(null);
+
     if (!success) {
-      showToast('Attack could not be completed.');
+      showToast('Action rejected: Attack could not be completed.');
+      setSelectedAttackerSlot(null);
       return;
     }
 
     // Trigger visual feedback only after acceptance
-    setAnimatingAttackerSlot(selectedAttackerSlot);
+    setAnimatingAttackerSlot(currentAttackerSlot);
     const targetKey = `opp-${targetSlotIndex}`;
     setImpactedSlotKey(targetKey);
 
@@ -208,7 +259,7 @@ export const BattlefieldScreen: React.FC<BattlefieldScreenProps> = ({
     }
 
     if (defenderCard.efficiency > 0) {
-      const attackerKey = `player-${selectedAttackerSlot}`;
+      const attackerKey = `player-${currentAttackerSlot}`;
       setTimeout(() => {
         addDamagePopup(attackerKey, `-${defenderCard.efficiency} HP`);
       }, 200);
@@ -218,8 +269,6 @@ export const BattlefieldScreen: React.FC<BattlefieldScreenProps> = ({
       setAnimatingAttackerSlot(null);
       setImpactedSlotKey(null);
       setSelectedAttackerSlot(null);
-      setIsAimingAttack(false);
-      setArrowStart(null);
     }, 450);
   };
 
@@ -228,23 +277,37 @@ export const BattlefieldScreen: React.FC<BattlefieldScreenProps> = ({
     if (selectedAttackerSlot === null) return;
     if (!isActionPhase) {
       showToast('Direct strikes can only be declared during the Operational Action phase.');
+      setIsAimingAttack(false);
+      setArrowStart(null);
       return;
     }
     if (opponentHasGuards) {
       showToast('Front Desk Guard is blocking direct access to the Supervisor desk!');
+      setIsAimingAttack(false);
+      setArrowStart(null);
       return;
     }
 
     const attackerCard = state.player.battlefield.find(s => s.slotIndex === selectedAttackerSlot)?.character;
-    if (!attackerCard) return;
-
-    const success = onExecuteAttack(selectedAttackerSlot, 'SUPERVISOR');
-    if (!success) {
-      showToast('Direct attack could not be completed.');
+    if (!attackerCard) {
+      setIsAimingAttack(false);
+      setArrowStart(null);
       return;
     }
 
-    setAnimatingAttackerSlot(selectedAttackerSlot);
+    const currentAttackerSlot = selectedAttackerSlot;
+    const success = onExecuteAttack(currentAttackerSlot, 'SUPERVISOR');
+    
+    setIsAimingAttack(false);
+    setArrowStart(null);
+
+    if (!success) {
+      showToast('Action rejected: Direct strike could not be completed.');
+      setSelectedAttackerSlot(null);
+      return;
+    }
+
+    setAnimatingAttackerSlot(currentAttackerSlot);
     setImpactedSlotKey('opp-supervisor');
     addDamagePopup('opp-supervisor', `-${attackerCard.efficiency} MORALE`);
 
@@ -252,8 +315,6 @@ export const BattlefieldScreen: React.FC<BattlefieldScreenProps> = ({
       setAnimatingAttackerSlot(null);
       setImpactedSlotKey(null);
       setSelectedAttackerSlot(null);
-      setIsAimingAttack(false);
-      setArrowStart(null);
       showToast('Direct strike registered on Supervisor Morale!');
     }, 450);
   };
@@ -271,13 +332,15 @@ export const BattlefieldScreen: React.FC<BattlefieldScreenProps> = ({
       return;
     }
 
-    const success = onPlayCard(selectedHandCard.id, slotIndex);
+    const cardToDeploy = selectedHandCard;
+    const success = onPlayCard(cardToDeploy.id, slotIndex);
     if (success) {
-      showToast(`Deployed ${selectedHandCard.name} to ${POSITION_NAMES[slotIndex]}!`);
+      showToast(`Deployed ${cardToDeploy.name} to ${POSITION_NAMES[slotIndex]}!`);
       setSelectedHandCardId(null);
       setDragOverSlotIndex(null);
     } else {
-      showToast('Insufficient Shift points for this deployment!');
+      showToast('Action rejected: Insufficient Shift points or position unavailable.');
+      // Retain selectedHandCardId so player does not lose their selection
     }
   };
 
@@ -291,23 +354,27 @@ export const BattlefieldScreen: React.FC<BattlefieldScreenProps> = ({
       showToast('Insufficient Shift points to authorize this action!');
       return;
     }
-    onPlayCard(card.id, 0);
-    setSelectedHandCardId(null);
-    showToast(`Authorized ${card.name}!`);
+    const success = onPlayCard(card.id, 0);
+    if (success) {
+      setSelectedHandCardId(null);
+      showToast(`Authorized ${card.name}!`);
+    } else {
+      showToast('Action rejected: Unable to authorize card.');
+    }
   };
 
   const handleAdvanceAndBanner = () => {
     const banners: Record<TurnPhase, string> = {
       SHIFT_START: 'PHASE 1: SHIFT START — Units ready, queue ticks down.',
       SHIFT_BUDGETING: 'PHASE 2: SHIFT BUDGETING — Shift points refilled.',
-      ADMIN_DRAW: 'PHASE 3: ADMIN DRAW — Shift card drawn to hand.',
+      ADMINISTRATIVE_DRAW: 'PHASE 3: ADMIN DRAW — Shift card drawn to hand.',
       OPERATIONAL_ACTION: 'PHASE 4: OPERATIONAL ACTION — Deploy, cast & declare attacks.',
       CLOCK_OUT: 'PHASE 5: CLOCK OUT — Buffs expire; shift ends.'
     };
     const phases: TurnPhase[] = [
       'SHIFT_START',
       'SHIFT_BUDGETING',
-      'ADMIN_DRAW',
+      'ADMINISTRATIVE_DRAW',
       'OPERATIONAL_ACTION',
       'CLOCK_OUT'
     ];
@@ -322,7 +389,8 @@ export const BattlefieldScreen: React.FC<BattlefieldScreenProps> = ({
   return (
     <div 
       ref={containerRef}
-      className="relative w-full min-h-[calc(100vh-53px)] counter-wood-grain flex flex-col justify-between overflow-hidden select-none pb-2"
+      style={{ touchAction: isAimingAttack ? 'none' : 'auto' }}
+      className={`relative w-full min-h-[calc(100vh-53px)] counter-wood-grain flex flex-col justify-between overflow-hidden select-none pb-2 ${isAimingAttack ? 'touch-none' : ''}`}
     >
       {/* Overhead Board Spotlight Effect */}
       <div className="absolute inset-0 board-spotlight pointer-events-none" />
@@ -371,6 +439,7 @@ export const BattlefieldScreen: React.FC<BattlefieldScreenProps> = ({
 
         {/* Opponent Hero Portrait (Center Top) */}
         <div 
+          data-opponent-hero="true"
           onMouseEnter={() => setIsOverValidTarget(selectedAttackerSlot !== null && !opponentHasGuards)}
           onMouseLeave={() => setIsOverValidTarget(false)}
         >
@@ -415,6 +484,7 @@ export const BattlefieldScreen: React.FC<BattlefieldScreenProps> = ({
                 return (
                   <div
                     key={slotKey}
+                    data-opponent-slot={slot.slotIndex}
                     onClick={() => handleAttackOpponentMinion(slot.slotIndex)}
                     onMouseEnter={() => {
                       if (slot.character) setHoveredCard(slot.character);
@@ -556,7 +626,7 @@ export const BattlefieldScreen: React.FC<BattlefieldScreenProps> = ({
                         isSelected={isAttackerSelected}
                         canAttack={isReadyToAttack}
                         animationClass={animatingAttackerSlot === slot.slotIndex ? 'anim-attack-up' : ''}
-                        onDragStartAttack={(e) => handleStartAttackAim(slot.slotIndex, e)}
+                        onPointerDownAttack={(e) => handleStartAttackAim(slot.slotIndex, e)}
                         onInspect={() => setInspectedCard(slot.character)}
                       />
                     )}

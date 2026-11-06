@@ -490,7 +490,7 @@ export class MockGameController {
     const phases: VisualGameState['activePhase'][] = [
       'SHIFT_START',
       'SHIFT_BUDGETING',
-      'ADMIN_DRAW',
+      'ADMINISTRATIVE_DRAW',
       'OPERATIONAL_ACTION',
       'CLOCK_OUT'
     ];
@@ -527,7 +527,7 @@ export class MockGameController {
       const activeSide = this.state.activePlayerSide === 'PLAYER' ? player : opponent;
       activeSide.shiftCap = Math.min(10, activeSide.shiftCap);
       activeSide.shiftAvailable = activeSide.shiftCap;
-    } else if (nextPhase === 'ADMIN_DRAW') {
+    } else if (nextPhase === 'ADMINISTRATIVE_DRAW') {
       // Phase 3: Administrative Draw — Draw 1 card if hand cap < 8
       const activeSide = this.state.activePlayerSide === 'PLAYER' ? player : opponent;
       if (activeSide.hand.length < 8 && activeSide.deckCount > 0) {
