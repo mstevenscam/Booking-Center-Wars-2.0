@@ -363,8 +363,10 @@ export function instantiateCard(def: CardDefinition, ownerId: PlayerId, zone: Zo
 /**
  * Initializes a single PlayerState
  */
-export function createPlayerState(playerId: PlayerId, deckDefs: CardDefinition[], instanceOffset = 0): PlayerState {
-  const deck = deckDefs.map((def, index) => instantiateCard(def, playerId, 'DECK', instanceOffset + index + 1));
+export function createPlayerState(playerId: PlayerId, deckDefs: CardDefinition[], instanceOffset?: number): PlayerState {
+  const deck = deckDefs.map((def, index) =>
+    instantiateCard(def, playerId, 'DECK', instanceOffset === undefined ? undefined : instanceOffset + index + 1)
+  );
   return {
     id: playerId,
     morale: 30,
