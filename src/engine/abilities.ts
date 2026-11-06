@@ -983,8 +983,12 @@ export function resolveAbilityEffect(
       events.push(`Ability [${ability.name}] effect ${ability.effectType} not recognized.`);
   }
 
-  // Evaluate State-Based Actions following atomic effect resolution
-  evaluateStateBasedActions(state, execContext);
+  // Combat damage reactions are one atomic simultaneous-damage window. Their
+  // state-based cleanup is deferred to the parent combat continuation so both
+  // sides' ON_DAMAGE_TAKEN triggers resolve before zero-Stamina units clock out.
+  if (triggerContext?.trigger !== 'ON_DAMAGE_TAKEN') {
+    evaluateStateBasedActions(state, execContext);
+  }
 
   state.historyLog.push(...events);
   return { success: true, events };
