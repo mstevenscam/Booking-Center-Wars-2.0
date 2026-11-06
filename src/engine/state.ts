@@ -306,10 +306,12 @@ export function validateDeck(deck: CardDefinition[]): DeckValidationResult {
 /**
  * Creates a unique CardInstance from a CardDefinition
  */
+let legacyInstanceCounter = 0;
 export function instantiateCard(def: CardDefinition, ownerId: PlayerId, zone: ZoneType = 'DECK', instanceNumber?: number): CardInstance {
   // Canonical match creation always supplies an explicit match-local sequence number.
-  // The stable fallback keeps this exported helper deterministic for isolated fixtures.
-  const stableInstanceNumber = instanceNumber ?? 'standalone';
+  // The fallback preserves uniqueness for legacy standalone callers and test fixtures;
+  // production match state never relies on this process-global compatibility path.
+  const stableInstanceNumber = instanceNumber ?? `legacy_${++legacyInstanceCounter}`;
   const hasOnDeploy = !!def.hasOnDeployAbility || !!(def.abilities && def.abilities.some(a => a.trigger === 'ON_DEPLOY' || a.trigger === 'ON_PLAY'));
   const abilities = def.abilities ? [...def.abilities] : [];
   const isFrontDeskGuard = !!def.isFrontDeskGuard;
