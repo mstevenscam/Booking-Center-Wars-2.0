@@ -109,10 +109,10 @@ describe('Capacity Triage retirement lifecycle', () => {
     assert.equal(state.players.p1.queue.length, 1, 'arrival ticket must remain queued while retirement trigger is unresolved');
     assert.equal(state.players.p1.battlefield.some(s => s.card.cardDefId === 'arriving_character'), false);
     assert.equal(state.players.p1.breakroom.some(card => card.instanceId === 'retire_me'), true);
-    assert.equal(state.pendingDecision?.type, 'ABILITY_TARGET_SELECTION');
-    if (state.pendingDecision?.type !== 'ABILITY_TARGET_SELECTION') throw new Error('Expected retirement ON_CLOCK_OUT decision');
-    assert.equal(state.pendingDecision.sourceInstanceId, 'retire_me');
-    assert.equal(state.pendingDecision.abilityId, 'retire_trigger_heal');
+    const retirementDecision = state.pendingDecision as any;
+    assert.equal(retirementDecision?.type, 'ABILITY_TARGET_SELECTION');
+    assert.equal(retirementDecision?.sourceInstanceId, 'retire_me');
+    assert.equal(retirementDecision?.abilityId, 'retire_trigger_heal');
     assert.equal(state.pendingContinuation?.type, 'CONTINUE_QUEUE_RESOLUTION');
 
     const resolveRetirement = executeAction(state, {
