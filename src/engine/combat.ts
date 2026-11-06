@@ -477,6 +477,18 @@ export function initiateAttack(
   state: GameState,
   attackerInstanceId: string
 ): { success: boolean; code?: ActionErrorCode; error?: string } {
+  // Keep this exported engine entry point safe even when called directly rather
+  // than through validateAction/executeAction.
+  if (state.status !== 'ACTIVE') {
+    return { success: false, code: 'MATCH_NOT_ACTIVE', error: 'Cannot initiate an attack after the match has completed.' };
+  }
+  if (state.currentPhase !== 'OPERATIONAL_ACTION') {
+    return { success: false, code: 'INVALID_PHASE', error: 'Attacks may only be initiated during OPERATIONAL_ACTION.' };
+  }
+  if (state.pendingDecision !== null || isOperationSuspended(state)) {
+    return { success: false, code: 'PENDING_DECISION_REQUIRED', error: 'Resolve the suspended game operation before initiating another attack.' };
+  }
+
   const activePlayer = state.players[state.activePlayerId];
   const attackerSlot = activePlayer.battlefield.find(s => s.card.instanceId === attackerInstanceId);
 
