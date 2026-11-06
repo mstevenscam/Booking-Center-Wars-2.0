@@ -167,8 +167,8 @@ describe('Canonical Shift Start ordering', () => {
         baseCost: 3,
         effectiveCost: 2,
         queuedTurn: 1,
-        queueDuration: 2,
-        remainingTurns: 2,
+        queueDuration: 3,
+        remainingTurns: 3,
         influence: 1,
         ownerId: 'p1',
         fifoIndex: 2
