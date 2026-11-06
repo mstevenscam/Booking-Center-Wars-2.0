@@ -9,7 +9,7 @@ function deck(prefix: string): CardDefinition[] {
   return Array.from({ length: 30 }, (_, i) => ({
     id: `${prefix}_${i}`,
     name: `${prefix} ${i}`,
-    cardType: 'CHARACTER',
+    cardType: 'CHARACTER' as const,
     baseCost: 1,
     influence: 1,
     efficiency: 1,
@@ -135,33 +135,50 @@ describe('Canonical Shift Start ordering', () => {
       p2Deck: deck('p2')
     });
     state.currentPhase = 'SHIFT_START';
-    state.players.p1.queue.push({
-      id: 'ticket_countdown',
-      cardId: 'queued_plain',
-      cardName: 'Queued Plain',
-      baseCost: 2,
-      effectiveCost: 1,
-      queuedTurn: 1,
-      queueDuration: 2,
-      remainingTurns: 2,
-      influence: 1,
-      ownerId: 'p1',
-      fifoIndex: 1,
-      hasOnDeployAbility: true,
-      abilities: [{
-        abilityId: 'queued_manual',
-        name: 'Queued Manual',
-        trigger: 'ON_DEPLOY',
-        targetFilter: 'FRIENDLY_SUPERVISOR',
-        effectType: 'HEAL_MORALE',
-        primaryValue: 1,
-        requiresManualTarget: true,
-        customDescription: ''
-      }]
-    });
+    state.players.p1.queue.push(
+      {
+        id: 'ticket_resolving',
+        cardId: 'queued_manual_arrival',
+        cardName: 'Queued Manual Arrival',
+        baseCost: 2,
+        effectiveCost: 1,
+        queuedTurn: 1,
+        queueDuration: 1,
+        remainingTurns: 1,
+        influence: 2,
+        ownerId: 'p1',
+        fifoIndex: 1,
+        hasOnDeployAbility: true,
+        abilities: [{
+          abilityId: 'queued_manual',
+          name: 'Queued Manual',
+          trigger: 'ON_DEPLOY',
+          targetFilter: 'FRIENDLY_SUPERVISOR',
+          effectType: 'HEAL_MORALE',
+          primaryValue: 1,
+          requiresManualTarget: true,
+          customDescription: ''
+        }]
+      },
+      {
+        id: 'ticket_waiting',
+        cardId: 'queued_waiting',
+        cardName: 'Queued Waiting',
+        baseCost: 3,
+        effectiveCost: 2,
+        queuedTurn: 1,
+        queueDuration: 2,
+        remainingTurns: 2,
+        influence: 1,
+        ownerId: 'p1',
+        fifoIndex: 2
+      }
+    );
 
     executeShiftStart(state);
-    assert.equal(state.players.p1.queue[0].remainingTurns, 1);
+    assert.equal(state.players.p1.queue.length, 1);
+    assert.equal(state.players.p1.queue[0].id, 'ticket_waiting');
+    assert.equal(state.players.p1.queue[0].remainingTurns, 2);
     assert.equal(state.pendingDecision?.type, 'ABILITY_TARGET_SELECTION');
 
     const result = executeAction(state, {
@@ -171,7 +188,7 @@ describe('Canonical Shift Start ordering', () => {
     });
     assert.equal(result.success, true);
     assert.equal(state.players.p1.queue.length, 1);
-    assert.equal(state.players.p1.queue[0].remainingTurns, 1);
+    assert.equal(state.players.p1.queue[0].remainingTurns, 2, 'resumption must not decrement the remaining ticket again');
     assert.equal(state.pendingDecision, null);
     assert.equal(state.pendingContinuation, null);
   });
