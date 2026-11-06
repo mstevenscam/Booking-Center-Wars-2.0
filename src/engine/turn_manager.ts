@@ -312,6 +312,46 @@ export function resolveQueueResolution(
           retired.currentZone = 'BREAKROOM';
           active.breakroom.push(retired);
 
+          // Retirement is a real departure from the battlefield. Resolve its
+          // ON_CLOCK_OUT reactions before the arriving ticket is deployed.
+          const retireRes = dispatchTriggers(state, 'ON_CLOCK_OUT', {
+            trigger: 'ON_CLOCK_OUT',
+            sourceInstanceId: retired.instanceId,
+            sourcePlayerId: active.id,
+            departingCard: retired
+          });
+          events.push(...retireRes.events);
+
+          if (isOperationSuspended(state)) {
+            const serializedTriage = triageDecisions ? Array.from(triageDecisions.entries()) : undefined;
+            state.pendingContinuation = {
+              type: 'CONTINUE_QUEUE_RESOLUTION',
+              playerId: active.id,
+              stage: 'RESOLVING_TICKETS',
+              countdownDecremented: true,
+              triageDecisions: serializedTriage
+            };
+            state.historyLog.push(...events);
+            return {
+              phase: 'SHIFT_START',
+              playerId: state.activePlayerId,
+              turn: state.currentTurn,
+              events
+            };
+          }
+
+          // A retirement trigger may end the match. Do not deploy the queued
+          // arrival or process further tickets after a completed match.
+          if (state.status === 'COMPLETED') {
+            state.historyLog.push(...events);
+            return {
+              phase: 'SHIFT_START',
+              playerId: state.activePlayerId,
+              turn: state.currentTurn,
+              events
+            };
+          }
+
           active.queue.splice(queueIdx, 1);
           state.instanceCounter = (state.instanceCounter || 0) + 1;
           const deployedCard: CardInstance = {
