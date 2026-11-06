@@ -208,7 +208,8 @@ export type PendingContinuation =
       playerId: PlayerId;
       attackerInstanceId: string;
       target: CombatTarget;
-      stage: 'AWAITING_ON_ATTACK';
+      stage: 'AWAITING_ON_ATTACK' | 'AWAITING_POST_DAMAGE_TRIGGERS';
+      combatDamageApplied?: boolean;
       executionContext?: { depth: number; budgetCount: number };
     }
   | {
