@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createInitialGameState, type CardDefinition } from '../state.js';
-import { executeShiftStart } from '../turn_manager.js';
+import { advanceToNextPhase, executeShiftStart } from '../turn_manager.js';
 import { executeAction } from '../actions.js';
 import { isOperationSuspended } from '../state.js';
 
@@ -124,6 +124,7 @@ describe('Canonical Shift Start ordering', () => {
     assert.equal(state.pendingDecision, null);
     assert.equal(state.pendingContinuation, null);
     assert.equal(isOperationSuspended(state), false);
+    assert.equal(state.currentPhase, 'SHIFT_BUDGETING');
     assert.equal(state.players.p1.queue.length, 0);
     assert.equal(state.players.p1.battlefield.filter(s => s.card.cardDefId === 'queued_arrival').length, 1);
   });
@@ -191,5 +192,11 @@ describe('Canonical Shift Start ordering', () => {
     assert.equal(state.players.p1.queue[0].remainingTurns, 2, 'resumption must not decrement the remaining ticket again');
     assert.equal(state.pendingDecision, null);
     assert.equal(state.pendingContinuation, null);
+    assert.equal(state.currentPhase, 'SHIFT_BUDGETING');
+
+    const advance = advanceToNextPhase(state);
+    assert.equal(advance.success, true);
+    assert.equal(state.currentPhase, 'OPERATIONAL_ACTION');
+    assert.equal(state.players.p1.queue[0].remainingTurns, 2, 'phase advancement must not rerun Shift Start');
   });
 });
