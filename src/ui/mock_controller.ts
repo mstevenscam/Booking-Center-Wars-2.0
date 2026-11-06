@@ -304,7 +304,7 @@ export function createInitialDemoState(): VisualGameState {
   return {
     matchId: 'bw-match-772',
     turnNumber: 4,
-    activePhase: 'ACTION',
+    activePhase: 'OPERATIONAL_ACTION',
     activePlayerSide: 'PLAYER',
     player: {
       id: 'p1-dave',
@@ -488,11 +488,11 @@ export class MockGameController {
 
   public advancePhase() {
     const phases: VisualGameState['activePhase'][] = [
-      'READY',
-      'DRAW',
-      'ACTION',
-      'COMBAT',
-      'END_OF_SHIFT'
+      'SHIFT_START',
+      'SHIFT_BUDGETING',
+      'ADMIN_DRAW',
+      'OPERATIONAL_ACTION',
+      'CLOCK_OUT'
     ];
     const currentIndex = phases.indexOf(this.state.activePhase);
     const nextIndex = (currentIndex + 1) % phases.length;
@@ -501,28 +501,19 @@ export class MockGameController {
     let newTurnNumber = this.state.turnNumber;
     let nextPlayer = this.state.activePlayerSide;
 
-    if (nextPhase === 'READY') {
-      // End of round handoff
-      newTurnNumber += 1;
-      nextPlayer = nextPlayer === 'PLAYER' ? 'OPPONENT' : 'PLAYER';
-    }
-
-    // Phase transition actions
     let player = { ...this.state.player };
     let opponent = { ...this.state.opponent };
     let queue = [...this.state.queue];
 
-    if (nextPhase === 'READY') {
-      // Ready all characters for active player
-      const targetSide = nextPlayer === 'PLAYER' ? player : opponent;
-      targetSide.shiftCap = Math.min(10, targetSide.shiftCap + (nextPlayer === 'PLAYER' ? 1 : 0));
-      targetSide.shiftAvailable = targetSide.shiftCap;
-      targetSide.battlefield = targetSide.battlefield.map(slot => ({
+    if (nextPhase === 'SHIFT_START') {
+      // Phase 1: Shift Start — Ready all battlefield characters, advance queue countdowns
+      const activeSide = this.state.activePlayerSide === 'PLAYER' ? player : opponent;
+      activeSide.battlefield = activeSide.battlefield.map(slot => ({
         ...slot,
         character: slot.character ? { ...slot.character, isExhausted: false } : null
       }));
-    } else if (nextPhase === 'END_OF_SHIFT') {
-      // Progress queue
+
+      // Decrement queue countdown
       queue = queue.map(ticket => {
         const remaining = Math.max(0, ticket.turnsRemaining - 1);
         return {
@@ -531,6 +522,35 @@ export class MockGameController {
           priorityLevel: remaining === 1 ? 'EXPEDITED' : ticket.priorityLevel
         };
       });
+    } else if (nextPhase === 'SHIFT_BUDGETING') {
+      // Phase 2: Shift Budgeting — Refill Shift capacity up to cap (max 10)
+      const activeSide = this.state.activePlayerSide === 'PLAYER' ? player : opponent;
+      activeSide.shiftCap = Math.min(10, activeSide.shiftCap);
+      activeSide.shiftAvailable = activeSide.shiftCap;
+    } else if (nextPhase === 'ADMIN_DRAW') {
+      // Phase 3: Administrative Draw — Draw 1 card if hand cap < 8
+      const activeSide = this.state.activePlayerSide === 'PLAYER' ? player : opponent;
+      if (activeSide.hand.length < 8 && activeSide.deckCount > 0) {
+        activeSide.deckCount = Math.max(0, activeSide.deckCount - 1);
+      }
+    } else if (nextPhase === 'CLOCK_OUT') {
+      // Phase 5: Clock Out — Expire temporary buffs and hand off turn to other player
+      player.battlefield = player.battlefield.map(slot => ({
+        ...slot,
+        character: slot.character ? { ...slot.character, staminaBuffer: 0 } : null
+      }));
+      opponent.battlefield = opponent.battlefield.map(slot => ({
+        ...slot,
+        character: slot.character ? { ...slot.character, staminaBuffer: 0 } : null
+      }));
+
+      // Handoff to opponent
+      nextPlayer = this.state.activePlayerSide === 'PLAYER' ? 'OPPONENT' : 'PLAYER';
+      if (nextPlayer === 'PLAYER') {
+        newTurnNumber += 1;
+        player.shiftCap = Math.min(10, player.shiftCap + 1);
+        opponent.shiftCap = Math.min(10, opponent.shiftCap + 1);
+      }
     }
 
     this.state = {
@@ -635,6 +655,9 @@ export class MockGameController {
     attackerSlotIndex: number, 
     targetSlotIndex: number | 'SUPERVISOR'
   ) {
+    if (this.state.activePhase !== 'OPERATIONAL_ACTION') {
+      return false;
+    }
     const attackerSlot = this.state.player.battlefield.find(s => s.slotIndex === attackerSlotIndex);
     if (!attackerSlot || !attackerSlot.character || attackerSlot.character.isExhausted) {
       return false;

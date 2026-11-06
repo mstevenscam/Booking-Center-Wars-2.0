@@ -89,26 +89,14 @@ export const QueueConveyor: React.FC<QueueConveyorProps> = ({
                       {isPlayer ? 'Friendly' : 'Opponent'}
                     </span>
                   </div>
-                  <div className="text-[11px] sm:text-xs font-bold text-slate-100 truncate max-w-[120px] sm:max-w-[160px] group-hover:text-amber-300 transition-colors">
+                  <div className="text-[11px] sm:text-xs font-bold text-slate-100 truncate max-w-[130px] sm:max-w-[180px] group-hover:text-amber-300 transition-colors">
                     {ticket.card.name}
                   </div>
                 </div>
 
-                {/* Action button: Expedite demo */}
-                {isPlayer && onExpediteTicket && ticket.turnsRemaining > 1 && (
-                  <button
-                    onClick={() => onExpediteTicket(ticket.id)}
-                    className="ml-0.5 px-1.5 py-1 rounded bg-amber-500/15 hover:bg-amber-500/35 text-amber-300 border border-amber-500/35 text-[9px] font-black flex items-center gap-0.5 transition-colors shadow-xs"
-                    title="Simulate queue acceleration (-1 turn)"
-                  >
-                    <Zap className="w-2.5 h-2.5" />
-                    <span>-1</span>
-                  </button>
-                )}
-
                 {/* Next In Line Indicator Arrow */}
                 {index === 0 && (
-                  <div className="ml-1 flex items-center text-amber-400 font-bold text-[9px] animate-pulse">
+                  <div className="ml-1 flex items-center text-amber-400 font-bold text-[9px] animate-pulse" title="Next in line to clear triage">
                     <ArrowRight className="w-3.5 h-3.5" />
                   </div>
                 )}

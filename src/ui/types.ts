@@ -52,7 +52,12 @@ export interface QueueTicketView {
   priorityLevel: 'STANDARD' | 'EXPEDITED' | 'OVERDUE';
 }
 
-export type TurnPhase = 'READY' | 'DRAW' | 'ACTION' | 'COMBAT' | 'END_OF_SHIFT';
+export type TurnPhase = 
+  | 'SHIFT_START' 
+  | 'SHIFT_BUDGETING' 
+  | 'ADMIN_DRAW' 
+  | 'OPERATIONAL_ACTION' 
+  | 'CLOCK_OUT';
 
 export interface PlayerStateView {
   id: string;
