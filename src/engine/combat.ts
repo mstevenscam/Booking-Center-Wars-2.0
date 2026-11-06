@@ -329,15 +329,40 @@ export function completeSuspendedCombat(
   target: CombatTarget,
   accumulatedEvents: string[] = []
 ): CombatExecutionResult {
-  state.pendingContinuation = null;
-  const events: string[] = accumulatedEvents;
-  const activePlayer = state.players[state.activePlayerId];
-  const opponentId: PlayerId = state.activePlayerId === 'p1' ? 'p2' : 'p1';
+  const continuation = state.pendingContinuation?.type === 'CONTINUE_COMBAT'
+    ? state.pendingContinuation
+    : null;
+  const actingPlayerId = continuation?.playerId ?? state.activePlayerId;
+  const activePlayer = state.players[actingPlayerId];
+  const opponentId: PlayerId = actingPlayerId === 'p1' ? 'p2' : 'p1';
   const opponent = state.players[opponentId];
+  const events = accumulatedEvents;
+
+  // Once simultaneous damage has been applied, resumption must finish queued
+  // reactions and the SBA sweep without applying that combat damage a second time.
+  if (continuation?.stage === 'AWAITING_POST_DAMAGE_TRIGGERS') {
+    evaluateStateBasedActions(state);
+    if (state.pendingDecision !== null || (state.pendingTriggerQueue?.length ?? 0) > 0) {
+      state.pendingContinuation = continuation;
+    } else {
+      state.pendingContinuation = null;
+    }
+    state.historyLog.push(...events);
+    return {
+      success: true,
+      attackerDamageDealt: 0,
+      defenderDamageDealt: 0,
+      attackerDied: !activePlayer.battlefield.some(s => s.card.instanceId === attackerInstanceId),
+      defenderDied: target.type === 'CHARACTER' && !opponent.battlefield.some(s => s.card.instanceId === target.characterInstanceId),
+      moraleDamageDealt: 0,
+      events
+    };
+  }
 
   const attackerSlot = activePlayer.battlefield.find(s => s.card.instanceId === attackerInstanceId);
   if (!attackerSlot || attackerSlot.card.stamina <= 0) {
     events.push(`Attacker (${attackerInstanceId}) is no longer able to complete combat.`);
+    state.pendingContinuation = null;
     state.historyLog.push(...events);
     return {
       success: true,
@@ -360,33 +385,25 @@ export function completeSuspendedCombat(
   if (target.type === 'MORALE') {
     moraleDamageDealt = Math.max(0, attackerCard.efficiency);
     opponent.morale = Math.max(0, opponent.morale - moraleDamageDealt);
-
-    events.push(
-      `${attackerCard.cardDefId} (${attackerCard.instanceId}) attacked Player ${opponentId.toUpperCase()}'s Morale directly for ${moraleDamageDealt} damage. (Morale: ${opponent.morale})`
-    );
+    events.push(`${attackerCard.cardDefId} (${attackerCard.instanceId}) attacked Player ${opponentId.toUpperCase()}'s Morale directly for ${moraleDamageDealt} damage. (Morale: ${opponent.morale})`);
   } else {
-    // Character-versus-character combat
     const defenderSlot = opponent.battlefield.find(s => s.card.instanceId === target.characterInstanceId);
     if (!defenderSlot || defenderSlot.card.stamina <= 0) {
       events.push(`Target character (${target.characterInstanceId}) is no longer on battlefield.`);
     } else {
       const defenderCard = defenderSlot.card;
-
       attackerDamageDealt = Math.max(0, attackerCard.efficiency);
       defenderDamageDealt = Math.max(0, defenderCard.efficiency);
 
-      events.push(
-        `${attackerCard.cardDefId} (Eff ${attackerDamageDealt}/Sta ${attackerCard.stamina}) engaged ${defenderCard.cardDefId} (Eff ${defenderDamageDealt}/Sta ${defenderCard.stamina}) in combat.`
-      );
+      events.push(`${attackerCard.cardDefId} (Eff ${attackerDamageDealt}/Sta ${attackerCard.stamina}) engaged ${defenderCard.cardDefId} (Eff ${defenderDamageDealt}/Sta ${defenderCard.stamina}) in combat.`);
 
-      // Simultaneous damage calculation and application
+      // Combat damage is simultaneous and is committed exactly once before reactions.
       defenderCard.stamina = Math.max(0, defenderCard.stamina - attackerDamageDealt);
       attackerCard.stamina = Math.max(0, attackerCard.stamina - defenderDamageDealt);
+      events.push(`Combat damage assigned simultaneously: ${defenderCard.cardDefId} took ${attackerDamageDealt} damage (Remaining Stamina: ${defenderCard.stamina}); ${attackerCard.cardDefId} took ${defenderDamageDealt} damage (Remaining Stamina: ${attackerCard.stamina}).`);
 
-      events.push(
-        `Combat damage assigned simultaneously: ${defenderCard.cardDefId} took ${attackerDamageDealt} damage (Remaining Stamina: ${defenderCard.stamina}); ${attackerCard.cardDefId} took ${defenderDamageDealt} damage (Remaining Stamina: ${attackerCard.stamina}).`
-      );
-
+      // Reactions are dispatched in a fixed order. If the first creates a manual
+      // decision, later reactions are appended to the shared FIFO trigger queue.
       if (attackerDamageDealt > 0) {
         const dmgRes = dispatchTriggers(state, 'ON_DAMAGE_TAKEN', {
           trigger: 'ON_DAMAGE_TAKEN',
@@ -402,23 +419,45 @@ export function completeSuspendedCombat(
         const dmgRes = dispatchTriggers(state, 'ON_DAMAGE_TAKEN', {
           trigger: 'ON_DAMAGE_TAKEN',
           sourceInstanceId: attackerCard.instanceId,
-          sourcePlayerId: activePlayer.id,
+          sourcePlayerId: actingPlayerId,
           attackerSlot: defenderSlot,
           damageAmount: defenderDamageDealt
         });
         events.push(...dmgRes.events);
       }
 
-      if (defenderCard.stamina <= 0) defenderDied = true;
-      if (attackerCard.stamina <= 0) attackerDied = true;
+      attackerDied = attackerCard.stamina <= 0;
+      defenderDied = defenderCard.stamina <= 0;
     }
   }
 
-  // State-based actions sweep
-  evaluateStateBasedActions(state);
+  if (state.pendingDecision !== null || (state.pendingTriggerQueue?.length ?? 0) > 0) {
+    state.pendingContinuation = {
+      type: 'CONTINUE_COMBAT',
+      playerId: actingPlayerId,
+      attackerInstanceId,
+      target,
+      stage: 'AWAITING_POST_DAMAGE_TRIGGERS',
+      combatDamageApplied: true
+    };
+  } else {
+    // SBA may itself enqueue ON_CLOCK_OUT reactions. Keep the continuation until
+    // those reactions and any nested decisions have completed.
+    state.pendingContinuation = {
+      type: 'CONTINUE_COMBAT',
+      playerId: actingPlayerId,
+      attackerInstanceId,
+      target,
+      stage: 'AWAITING_POST_DAMAGE_TRIGGERS',
+      combatDamageApplied: true
+    };
+    evaluateStateBasedActions(state);
+    if (state.pendingDecision === null && (state.pendingTriggerQueue?.length ?? 0) === 0) {
+      state.pendingContinuation = null;
+    }
+  }
 
   state.historyLog.push(...events);
-
   return {
     success: true,
     attackerDamageDealt,
