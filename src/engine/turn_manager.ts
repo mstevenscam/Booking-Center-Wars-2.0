@@ -140,7 +140,7 @@ export function executeShiftStart(
 }
 
 /**
- * Completes Phase 1 queue decrement, capacity triage, and State-Based Actions sweep after START_OF_SHIFT triggers finish.
+ * Finalizes Phase 1 after START_OF_SHIFT triggers finish; queue processing has already completed.
  */
 export function completeShiftStartAfterTriggers(
   state: GameState,
@@ -151,6 +151,9 @@ export function completeShiftStartAfterTriggers(
   // Queue countdown and ticket resolution have already completed and must not repeat.
   const events = accumulatedEvents;
   evaluateStateBasedActions(state);
+  if (state.status !== 'COMPLETED') {
+    state.currentPhase = 'SHIFT_BUDGETING';
+  }
   state.historyLog.push(...events);
   return {
     phase: 'SHIFT_START',
@@ -492,6 +495,11 @@ export function resolveQueueResolution(
   }
 
   evaluateStateBasedActions(state);
+  if (state.status !== 'COMPLETED' && !isOperationSuspended(state)) {
+    // Also handles completion through RESOLVE_TRIAGE or a resumed queue trigger,
+    // where advanceToNextPhase is not on the current call stack.
+    state.currentPhase = 'SHIFT_BUDGETING';
+  }
   state.historyLog.push(...events);
 
   return {
