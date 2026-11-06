@@ -83,10 +83,8 @@ describe('Combat continuation after damage reactions', () => {
     assert.equal(state.players.p2.morale, 21);
     assert.equal(state.pendingDecision?.type, 'ABILITY_TARGET_SELECTION');
     assert.equal(state.pendingDecision?.playerId, 'p1');
-    assert.equal(state.players.p1.battlefield.length, 0, 'SBA runs after the first resolved trigger, per the canonical trigger-boundary rule');
-    assert.equal(state.players.p2.battlefield.length, 0);
-    assert.equal(state.players.p1.breakroom.some(card => card.instanceId === attacker.instanceId), true);
-    assert.equal(state.players.p2.breakroom.some(card => card.instanceId === defender.instanceId), true);
+    assert.equal(state.players.p1.battlefield.length, 1, 'combat SBA must wait until both simultaneous damage reactions finish');
+    assert.equal(state.players.p2.battlefield.length, 1);
 
     const second = executeAction(state, {
       type: 'RESOLVE_ABILITY_TARGET',
