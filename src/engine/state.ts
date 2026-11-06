@@ -306,9 +306,10 @@ export function validateDeck(deck: CardDefinition[]): DeckValidationResult {
 /**
  * Creates a unique CardInstance from a CardDefinition
  */
-let instanceCounter = 0;
-export function instantiateCard(def: CardDefinition, ownerId: PlayerId, zone: ZoneType = 'DECK'): CardInstance {
-  instanceCounter++;
+export function instantiateCard(def: CardDefinition, ownerId: PlayerId, zone: ZoneType = 'DECK', instanceNumber?: number): CardInstance {
+  // Canonical match creation always supplies an explicit match-local sequence number.
+  // The stable fallback keeps this exported helper deterministic for isolated fixtures.
+  const stableInstanceNumber = instanceNumber ?? 'standalone';
   const hasOnDeploy = !!def.hasOnDeployAbility || !!(def.abilities && def.abilities.some(a => a.trigger === 'ON_DEPLOY' || a.trigger === 'ON_PLAY'));
   const abilities = def.abilities ? [...def.abilities] : [];
   const isFrontDeskGuard = !!def.isFrontDeskGuard;
@@ -330,7 +331,7 @@ export function instantiateCard(def: CardDefinition, ownerId: PlayerId, zone: Zo
   };
 
   return {
-    instanceId: `inst_${ownerId}_${def.id}_${instanceCounter}`,
+    instanceId: `inst_${ownerId}_${def.id}_${stableInstanceNumber}`,
     cardDefId: def.id,
     ownerId,
     currentZone: zone,
@@ -359,8 +360,8 @@ export function instantiateCard(def: CardDefinition, ownerId: PlayerId, zone: Zo
 /**
  * Initializes a single PlayerState
  */
-export function createPlayerState(playerId: PlayerId, deckDefs: CardDefinition[]): PlayerState {
-  const deck = deckDefs.map(def => instantiateCard(def, playerId, 'DECK'));
+export function createPlayerState(playerId: PlayerId, deckDefs: CardDefinition[], instanceOffset = 0): PlayerState {
+  const deck = deckDefs.map((def, index) => instantiateCard(def, playerId, 'DECK', instanceOffset + index + 1));
   return {
     id: playerId,
     morale: 30,
@@ -401,8 +402,8 @@ export function createInitialGameState(config: MatchInitConfig): GameState {
   const startingConfig: StartingCompensationConfig = config.config || 'CONFIG_D';
   const matchId = config.matchId || `match_${Date.now()}`;
 
-  const p1 = createPlayerState('p1', config.p1Deck);
-  const p2 = createPlayerState('p2', config.p2Deck);
+  const p1 = createPlayerState('p1', config.p1Deck, 0);
+  const p2 = createPlayerState('p2', config.p2Deck, config.p1Deck.length);
 
   // Apply Config D vs Config E compensation
   if (startingConfig === 'CONFIG_D') {
