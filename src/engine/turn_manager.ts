@@ -133,32 +133,10 @@ export function executeShiftStart(
   }
   events.push(`All friendly battlefield units set to Ready.`);
 
-  resetAbilityExecutionBudget();
-  const startRes = dispatchTriggers(state, 'START_OF_SHIFT', {
-    trigger: 'START_OF_SHIFT',
-    sourceInstanceId: '',
-    sourcePlayerId: active.id
-  });
-  events.push(...startRes.events);
-
-  if (startRes.pendingDecisionCreated || state.pendingDecision !== null || (state.pendingTriggerQueue && state.pendingTriggerQueue.length > 0)) {
-    const serializedTriage = triageDecisions ? Array.from(triageDecisions.entries()) : undefined;
-    state.pendingContinuation = {
-      type: 'CONTINUE_SHIFT_START',
-      playerId: active.id,
-      stage: 'AWAITING_START_OF_SHIFT',
-      triageDecisions: serializedTriage
-    };
-    state.historyLog.push(...events);
-    return {
-      phase: 'SHIFT_START',
-      playerId: state.activePlayerId,
-      turn: state.currentTurn,
-      events
-    };
-  }
-
-  return completeShiftStartAfterTriggers(state, events, triageDecisions);
+  // Canonical Phase 1 order: ready units, resolve queue arrivals/triage,
+  // then dispatch START_OF_SHIFT abilities. Queue resolution owns the
+  // continuation until every arrival and its ON_DEPLOY triggers are complete.
+  return resolveQueueResolution(state, events, false, triageDecisions);
 }
 
 /**
@@ -167,9 +145,19 @@ export function executeShiftStart(
 export function completeShiftStartAfterTriggers(
   state: GameState,
   accumulatedEvents: string[] = [],
-  triageDecisions?: Map<string, TriageDecision>
+  _triageDecisions?: Map<string, TriageDecision>
 ): TurnExecutionLog {
-  return resolveQueueResolution(state, accumulatedEvents, false, triageDecisions);
+  // This continuation is reached only after START_OF_SHIFT abilities finish.
+  // Queue countdown and ticket resolution have already completed and must not repeat.
+  const events = accumulatedEvents;
+  evaluateStateBasedActions(state);
+  state.historyLog.push(...events);
+  return {
+    phase: 'SHIFT_START',
+    playerId: state.activePlayerId,
+    turn: state.currentTurn,
+    events
+  };
 }
 
 /**
@@ -472,6 +460,34 @@ export function resolveQueueResolution(
         active.breakroom.push(discardedCard);
         events.push(`Triage Option 3: Ticket ${ticket.cardName} discarded to Breakroom.`);
       }
+    }
+  }
+
+  // Queue processing (including every ON_DEPLOY reaction) is complete.
+  // START_OF_SHIFT triggers are deliberately dispatched afterwards, matching
+  // the canonical five-phase rules sequence.
+  if (state.pendingDecision === null && (!state.pendingTriggerQueue || state.pendingTriggerQueue.length === 0)) {
+    resetAbilityExecutionBudget();
+    const startRes = dispatchTriggers(state, 'START_OF_SHIFT', {
+      trigger: 'START_OF_SHIFT',
+      sourceInstanceId: '',
+      sourcePlayerId: active.id
+    });
+    events.push(...startRes.events);
+
+    if (startRes.pendingDecisionCreated || state.pendingDecision !== null || (state.pendingTriggerQueue && state.pendingTriggerQueue.length > 0)) {
+      state.pendingContinuation = {
+        type: 'CONTINUE_SHIFT_START',
+        playerId: active.id,
+        stage: 'AWAITING_START_OF_SHIFT'
+      };
+      state.historyLog.push(...events);
+      return {
+        phase: 'SHIFT_START',
+        playerId: state.activePlayerId,
+        turn: state.currentTurn,
+        events
+      };
     }
   }
 
