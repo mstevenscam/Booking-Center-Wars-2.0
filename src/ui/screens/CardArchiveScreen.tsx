@@ -37,7 +37,8 @@ import {
   PlayableCardDefinition, 
   ArchiveClassification, 
   ArchiveSourceProvider,
-  ArchiveFilterOptions 
+  ArchiveFilterOptions,
+  StorageStatus
 } from '../archive/types';
 import { archiveStorage } from '../archive/storage';
 import { formatFileSize } from '../archive/utils';
@@ -54,6 +55,11 @@ export const CardArchiveScreen: React.FC = () => {
   const [thumbnails, setThumbnails] = useState<Map<string, string>>(new Map());
   const [storageUsage, setStorageUsage] = useState({ totalBytes: 0, recordCount: 0, binaryCount: 0 });
   const [isLoading, setIsLoading] = useState(true);
+  const [storageStatus, setStorageStatus] = useState<StorageStatus>({
+    isPersistent: true,
+    storageEngine: 'INDEXED_DB',
+    error: null,
+  });
 
   // Tab & Filter states
   const [activeTab, setActiveTab] = useState<'ALL_SCANS' | 'PLAYABLE_CARDS' | 'PSD_TEMPLATES'>('ALL_SCANS');
@@ -85,6 +91,7 @@ export const CardArchiveScreen: React.FC = () => {
     setIsLoading(true);
     try {
       await archiveStorage.init();
+      setStorageStatus(archiveStorage.getStorageStatus());
       const allRecords = await archiveStorage.getAllArchiveRecords();
       const allPlayable = await archiveStorage.getAllPlayableCards();
       const usage = await archiveStorage.getStorageUsage();
@@ -128,10 +135,15 @@ export const CardArchiveScreen: React.FC = () => {
     };
   }, [thumbnails]);
 
-  // Seed sample physical archive cards if archive is fresh & empty
+  // Seed fictional sample cards strictly for development/interface testing
   const handleSeedSampleArchives = async () => {
+    if (!storageStatus.isPersistent) {
+      alert(`Persistent storage unavailable:\n${storageStatus.error || 'IndexedDB is blocked in this session.'}`);
+      return;
+    }
+
     setIsLoading(true);
-    showToast('Archiving 5 physical sample scans & templates...');
+    showToast('Loading 5 fictional demo cards for interface testing...');
 
     const samples: { name: string; type: string; year: number; classif: ArchiveClassification; notes: string }[] = [
       {
@@ -139,54 +151,53 @@ export const CardArchiveScreen: React.FC = () => {
         type: 'image/png',
         year: 2018,
         classif: 'CARD_ARTWORK',
-        notes: 'Hand-drawn index card scan by Dave during the Humber AV intake orientation.',
+        notes: '[DEMO DATA] Fictional test scan for UI development.',
       },
       {
         name: '2021_Broadcast_Rig_Pencil_Mockup.jpg',
         type: 'image/jpeg',
         year: 2021,
         classif: 'CARD_ARTWORK',
-        notes: 'Card concept sketch for the 4K Broadcast Camera station.',
+        notes: '[DEMO DATA] Fictional concept sketch for UI development.',
       },
       {
         name: '2022_Dave_Maestro_Master_Template.psd',
         type: 'image/vnd.adobe.photoshop',
         year: 2022,
         classif: 'PHOTOSHOP_TEMPLATE',
-        notes: 'Original layered PSD template used for the Facilities Supervisor series.',
+        notes: '[DEMO DATA] Fictional Photoshop template for UI development.',
       },
       {
         name: '2022_Gaffer_Tape_First_Printing.jpg',
         type: 'image/jpeg',
         year: 2022,
         classif: 'CARD_ARTWORK',
-        notes: 'Original photograph of actual 3M heavy duty tape roll on the Tech Bench.',
+        notes: '[DEMO DATA] Fictional photograph for UI development.',
       },
       {
         name: '2023_Bulb_Disaster_Original_Scan.webp',
         type: 'image/webp',
         year: 2023,
         classif: 'CARD_ARTWORK',
-        notes: 'Memorialized print of the 300W halogen projector meltdown in room D204.',
+        notes: '[DEMO DATA] Fictional halogen scan for UI development.',
       },
     ];
 
     for (const sample of samples) {
-      // Create SVG placeholder blob for sample
       const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="420" viewBox="0 0 300 420">
         <rect width="300" height="420" fill="#0f172a" />
         <rect x="15" y="15" width="270" height="390" fill="#1e293b" stroke="#f59e0b" stroke-width="2" rx="16" />
-        <text x="150" y="80" font-family="sans-serif" font-size="16" font-weight="bold" fill="#f59e0b" text-anchor="middle">BOOKING WARS</text>
-        <text x="150" y="110" font-family="sans-serif" font-size="12" fill="#94a3b8" text-anchor="middle">PHYSICAL SCAN ARCHIVE</text>
-        <rect x="35" y="130" width="230" height="180" fill="#0284c7" opacity="0.4" rx="8" />
-        <text x="150" y="225" font-family="monospace" font-size="14" font-weight="bold" fill="#ffffff" text-anchor="middle">${sample.year} SCAN</text>
+        <text x="150" y="70" font-family="sans-serif" font-size="14" font-weight="bold" fill="#f59e0b" text-anchor="middle">BOOKING WARS</text>
+        <text x="150" y="95" font-family="sans-serif" font-size="10" fill="#f87171" font-weight="bold" text-anchor="middle">[DEMO SAMPLE DATA]</text>
+        <rect x="35" y="120" width="230" height="180" fill="#0284c7" opacity="0.3" rx="8" />
+        <text x="150" y="215" font-family="monospace" font-size="14" font-weight="bold" fill="#ffffff" text-anchor="middle">${sample.year} DEMO</text>
         <text x="150" y="340" font-family="sans-serif" font-size="11" fill="#e2e8f0" text-anchor="middle">${sample.name.slice(0, 26)}</text>
-        <text x="150" y="365" font-family="sans-serif" font-size="9" fill="#64748b" text-anchor="middle">Original Scanned Physical Copy</text>
+        <text x="150" y="365" font-family="sans-serif" font-size="9" fill="#94a3b8" text-anchor="middle">Fictional Development Sample</text>
       </svg>`;
 
       const blob = new Blob([svgContent], { type: sample.type });
       const checksum = `seed-${sample.year}-${sample.name.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
-      const archiveId = `arc-${sample.year}-${sample.name.toLowerCase().slice(0, 16)}-${checksum.slice(0, 8)}`;
+      const archiveId = `arc-${sample.year}-${sample.name.toLowerCase().slice(0, 16)}-${checksum.slice(0, 16)}`;
 
       await archiveStorage.saveArchiveRecord({
         archiveId,
@@ -196,17 +207,17 @@ export const CardArchiveScreen: React.FC = () => {
         originalFileChecksum: checksum,
         originalCreationYear: sample.year,
         sourceProvider: 'LOCAL_UPLOAD',
-        sourceFolderPath: 'Physical Scans/Humber Binder',
+        sourceFolderPath: 'Demo Development Data',
         sourceDriveFileId: null,
         importedAt: new Date().toISOString(),
         classification: sample.classif,
         userNotes: sample.notes,
+        isDemoData: true,
         derivedThumbnailId: null,
       }, blob, null);
     }
 
     await refreshArchive();
-    showToast('5 historical card scans successfully added to archive!');
   };
 
   // Export full archive backup JSON bundle
@@ -391,6 +402,19 @@ export const CardArchiveScreen: React.FC = () => {
           </div>
         </div>
 
+        {/* Persistent Storage Health Banner */}
+        {!storageStatus.isPersistent && (
+          <div className="bg-rose-950/80 border border-rose-500/40 rounded-2xl p-4 flex items-center gap-3 text-rose-200 text-xs shadow-lg">
+            <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
+            <div>
+              <div className="font-bold">Persistent Browser Storage (IndexedDB) Unavailable</div>
+              <div className="text-[11px] text-rose-300 mt-0.5">
+                {storageStatus.error || 'IndexedDB is blocked or disabled in this browser session (e.g. private window or permissions).'} Card scans cannot be saved permanently until browser storage permissions are permitted.
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Live Storage & Collection Telemetry Metrics */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 flex items-center gap-3">
@@ -536,23 +560,36 @@ export const CardArchiveScreen: React.FC = () => {
             <div>
               <h3 className="text-lg font-black text-slate-200">Your Physical Card Archive is Empty</h3>
               <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto leading-relaxed">
-                Import your original scanned physical cards from Google Drive or your local computer. 
-                Files are cryptographically protected and stored permanently in your local IndexedDB database.
+                Import your original scanned physical cards from your local computer (individual files or year-organized folders) or Google Drive.
+                Original files and Photoshop templates are cryptographically verified and stored unaltered in your local IndexedDB database.
               </p>
             </div>
 
-            <div className="flex items-center justify-center gap-3 pt-2">
+            <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
               <button
                 onClick={() => setImportModalOpen(true)}
-                className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition-colors shadow-lg"
+                className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition-colors shadow-lg flex items-center gap-1.5"
               >
-                Import Physical Cards
+                <Upload className="w-4 h-4" />
+                <span>Import Physical Cards</span>
               </button>
               <button
-                onClick={handleSeedSampleArchives}
-                className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-850 text-amber-300 border border-slate-800 font-bold text-xs transition-colors"
+                onClick={() => setDriveSetupOpen(true)}
+                className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-850 text-sky-400 border border-sky-500/30 font-bold text-xs transition-colors flex items-center gap-1.5"
               >
-                Seed 5 Sample Scans
+                <HardDrive className="w-4 h-4" />
+                <span>Google Drive Guide</span>
+              </button>
+            </div>
+
+            {/* Clearly separated, explicit demo data tool */}
+            <div className="pt-4 border-t border-slate-900 mt-4">
+              <span className="text-[10px] text-slate-500 block mb-2 font-mono uppercase tracking-wider">Development & UI Preview Only</span>
+              <button
+                onClick={handleSeedSampleArchives}
+                className="px-3.5 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-900 text-slate-400 hover:text-amber-300 border border-slate-800 text-[11px] font-mono transition-colors inline-flex items-center gap-1.5"
+              >
+                <span>🧪 Load 5 Fictional Demo Cards (For UI Evaluation Only)</span>
               </button>
             </div>
           </div>
@@ -580,9 +617,16 @@ export const CardArchiveScreen: React.FC = () => {
                     >
                       {/* Top Badges Bar */}
                       <div className="p-2 flex items-center justify-between text-[8px] font-bold z-10">
-                        <span className="px-1.5 py-0.2 rounded bg-slate-900/90 text-amber-300 border border-slate-800 font-mono">
-                          {rec.originalCreationYear || 'UNDATED'}
-                        </span>
+                        <div className="flex items-center gap-1">
+                          <span className="px-1.5 py-0.2 rounded bg-slate-900/90 text-amber-300 border border-slate-800 font-mono">
+                            {rec.originalCreationYear || 'UNDATED'}
+                          </span>
+                          {rec.isDemoData && (
+                            <span className="px-1 py-0.2 rounded bg-rose-950 text-rose-300 border border-rose-500/40 text-[7px] uppercase font-black">
+                              DEMO
+                            </span>
+                          )}
+                        </div>
                         {variationsCount > 0 && (
                           <span className="px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-300 border border-emerald-500/40 font-mono">
                             {variationsCount} {variationsCount === 1 ? 'Variation' : 'Variations'}
@@ -723,7 +767,6 @@ export const CardArchiveScreen: React.FC = () => {
       <GoogleDriveSetupModal
         isOpen={driveSetupOpen}
         onClose={() => setDriveSetupOpen(false)}
-        onTestSimulatedDrive={handleSeedSampleArchives}
       />
     </div>
   );

@@ -34,6 +34,7 @@ export interface HistoricalCardArchive {
   classification: ArchiveClassification;
   userNotes: string | null;
   derivedThumbnailId?: string | null;
+  isDemoData?: boolean;
   metadata?: {
     photoshopLayersDetected?: boolean;
     dimensions?: { width: number; height: number };
@@ -41,6 +42,22 @@ export interface HistoricalCardArchive {
     aiSuggestedDepartment?: Department;
     aiExtractedFlavor?: string;
   };
+}
+
+export interface StorageStatus {
+  isPersistent: boolean;
+  storageEngine: 'INDEXED_DB' | 'UNAVAILABLE';
+  error: string | null;
+  isDevMemoryMode?: boolean;
+}
+
+export interface BundleValidationResult {
+  isValid: boolean;
+  errors: string[];
+  warnings: string[];
+  recordsCount: number;
+  assetsCount: number;
+  playableCount: number;
 }
 
 export interface PlayableCardDefinition {

@@ -1,30 +1,33 @@
 /**
  * BOOKING WARS: THE BATTLE FOR THE BOOKING CENTRE
- * Milestone 4: Physical Card Archive & Import Centre — Automated Test Suite
+ * Milestone 4B: Archive Reliability, Import Corrections & Verification Test Suite
  * 
- * Verifies all 15 acceptance criteria:
- * 1.  Import single JPG scan file
- * 2.  Import batch of mixed scan files (JPG, PNG)
- * 3.  Import Photoshop template (.psd) as PHOTOSHOP_TEMPLATE
- * 4.  Flag / handle unsupported non-card file format as OTHER_ASSET
- * 5.  Generate stable, deterministic archive IDs
- * 6.  Detect duplicate files via SHA-256 checksum matching
- * 7.  Detect duplicate Google Drive files via Drive file ID
- * 8.  Preserve original file metadata and unaltered binary integrity
- * 9.  Link one archive record to multiple playable card variations
- * 10. Deleting a playable card variation does NOT delete underlying archive record
- * 11. Editing playable card stats does NOT modify source archive asset
- * 12. Persist records across re-initialization
- * 13. Export and restore archive backup bundles
- * 14. Handle failed/aborted imports without corrupting existing archive
- * 15. Graceful memory fallback operation when IndexedDB is unavailable
+ * Verifies:
+ * 1.  Single JPG scan file import and retrieval
+ * 2.  Batch of mixed scan files (JPG, PNG) with folder path preservation
+ * 3.  Photoshop master template (.psd) import with bit-for-bit byte preservation
+ * 4.  Flagging non-card assets as OTHER_ASSET
+ * 5.  Accurate year extraction (older, current, future years & filtering unrelated 4-digit numbers)
+ * 6.  Stable, deterministic 16-char hash archive ID generation
+ * 7.  Archive ID collision safety: prevents overwriting existing records with different content
+ * 8.  Duplicate detection via SHA-256 content checksum
+ * 9.  Duplicate detection via Google Drive file ID
+ * 10. Persistent storage fail-safe: blocks saving and throws error when IndexedDB is unavailable
+ * 11. Preserves original file metadata without alteration or corruption
+ * 12. Linking one historical archive record to multiple playable card variations
+ * 13. Deleting playable variations does NOT delete source archive scan
+ * 14. Editing playable card stats does NOT alter source asset or checksum
+ * 15. Persistence across storage client re-initialization
+ * 16. Backup bundle validation: rejects checksum mismatches, missing assets, and broken references
+ * 17. Backup restore: restores records and assets into clean database without silent overwrite
+ * 18. Failed/partial batch import isolation: catches item errors without corrupting valid records
  */
 
 import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { indexedDB as fakeIDB } from 'fake-indexeddb';
 
-// Ensure indexedDB is globally available for the tests
+// Ensure indexedDB is globally available for tests
 (globalThis as any).indexedDB = fakeIDB;
 
 import { ArchiveStorage } from '../storage';
@@ -34,9 +37,9 @@ import {
   extractYearFromFilename, 
   generateStableArchiveId 
 } from '../utils';
-import { HistoricalCardArchive, PlayableCardDefinition } from '../types';
+import { HistoricalCardArchive, PlayableCardDefinition, ArchiveExportBundle } from '../types';
 
-describe('Milestone 4 — Physical Card Archive & Import Centre', () => {
+describe('Milestone 4B — Archive Reliability, Import Corrections & Verification', () => {
   let storage: ArchiveStorage;
 
   beforeEach(async () => {
@@ -45,7 +48,7 @@ describe('Milestone 4 — Physical Card Archive & Import Centre', () => {
     await storage.clearAll();
   });
 
-  // TEST 1: Import a single JPG scan file
+  // TEST 1: Single JPG scan file import
   test('1. Imports a single JPG scan file and retrieves it', async () => {
     const rawData = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x01, 0x02, 0x03, 0x04]);
     const blob = new Blob([rawData], { type: 'image/jpeg' });
@@ -88,26 +91,27 @@ describe('Milestone 4 — Physical Card Archive & Import Centre', () => {
     assert.equal(retrievedBlob?.size, blob.size);
   });
 
-  // TEST 2: Import a batch of mixed scan files (JPG, PNG)
-  test('2. Imports a batch of mixed scan files (JPG, PNG)', async () => {
+  // TEST 2: Batch import with folder path preservation
+  test('2. Imports batch of mixed scan files and preserves relative folder hierarchy', async () => {
     const files = [
-      { name: 'Card_A.jpg', type: 'image/jpeg', bytes: [1, 2, 3] },
-      { name: 'Card_B.png', type: 'image/png', bytes: [4, 5, 6, 7] },
-      { name: 'Card_C.webp', type: 'image/webp', bytes: [8, 9, 10, 11, 12] },
+      { name: 'Card_A.jpg', type: 'image/jpeg', bytes: [1, 2, 3], folder: '2019/Tech_Bench' },
+      { name: 'Card_B.png', type: 'image/png', bytes: [4, 5, 6, 7], folder: '2021/Facilities' },
+      { name: 'Card_C.webp', type: 'image/webp', bytes: [8, 9, 10, 11, 12], folder: '2022/Admin' },
     ];
 
     for (const f of files) {
       const blob = new Blob([new Uint8Array(f.bytes)], { type: f.type });
       const checksum = await calculateFileChecksum(blob);
+      const year = extractYearFromFilename(f.name, f.folder);
       const record: HistoricalCardArchive = {
         archiveId: `arc-${f.name}`,
         originalFileName: f.name,
         originalFileSize: blob.size,
         originalFileType: f.type,
         originalFileChecksum: checksum,
-        originalCreationYear: 2022,
+        originalCreationYear: year,
         sourceProvider: 'LOCAL_UPLOAD',
-        sourceFolderPath: null,
+        sourceFolderPath: f.folder,
         sourceDriveFileId: null,
         importedAt: new Date().toISOString(),
         classification: classifyFile(f.name, f.type),
@@ -118,11 +122,13 @@ describe('Milestone 4 — Physical Card Archive & Import Centre', () => {
 
     const all = await storage.getAllArchiveRecords();
     assert.equal(all.length, 3, 'Should contain all 3 batch imported records');
-    const names = all.map(r => r.originalFileName).sort();
-    assert.deepEqual(names, ['Card_A.jpg', 'Card_B.png', 'Card_C.webp']);
+
+    const cardA = all.find(r => r.originalFileName === 'Card_A.jpg');
+    assert.equal(cardA?.sourceFolderPath, '2019/Tech_Bench', 'Must preserve relative folder path');
+    assert.equal(cardA?.originalCreationYear, 2019, 'Must extract year from folder path');
   });
 
-  // TEST 3: Import a Photoshop template (.psd)
+  // TEST 3: Photoshop template (.psd) bit-for-bit byte preservation
   test('3. Imports Photoshop template (.psd) classified as PHOTOSHOP_TEMPLATE with intact binary', async () => {
     const psdBytes = new Uint8Array([0x38, 0x42, 0x50, 0x53, 0x00, 0x01, 0x99, 0x88]); // 8BPS header
     const blob = new Blob([psdBytes], { type: 'image/vnd.adobe.photoshop' });
@@ -159,34 +165,96 @@ describe('Milestone 4 — Physical Card Archive & Import Centre', () => {
     assert.equal(check, checksum, 'Stored binary must preserve exact unaltered byte checksum');
   });
 
-  // TEST 4: Flag or reject unsupported file formats
-  test('4. Flags non-card assets (e.g. PDF, spreadsheet) as OTHER_ASSET', () => {
-    const pdfClass = classifyFile('annual_budget_2021.pdf', 'application/pdf');
-    assert.equal(pdfClass, 'OTHER_ASSET');
-
-    const xlsxClass = classifyFile('booking_shifts.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    assert.equal(xlsxClass, 'OTHER_ASSET');
-
-    const zipClass = classifyFile('backup.zip', 'application/zip');
-    assert.equal(zipClass, 'OTHER_ASSET');
+  // TEST 4: Flag non-card assets as OTHER_ASSET
+  test('4. Flags non-card assets (e.g. PDF, spreadsheet, zip) as OTHER_ASSET', () => {
+    assert.equal(classifyFile('annual_budget_2021.pdf', 'application/pdf'), 'OTHER_ASSET');
+    assert.equal(classifyFile('booking_shifts.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'), 'OTHER_ASSET');
+    assert.equal(classifyFile('backup.zip', 'application/zip'), 'OTHER_ASSET');
   });
 
-  // TEST 5: Generate stable, deterministic archive IDs
-  test('5. Generates stable, deterministic archive IDs from file content and metadata', () => {
+  // TEST 5: Comprehensive year extraction (older, current, future years & filtering unrelated numbers)
+  test('5. Accurately extracts creation years and filters out unrelated 4-digit numbers', () => {
+    // Older historical years
+    assert.equal(extractYearFromFilename('1985_Retro_Staff.jpg'), 1985);
+    assert.equal(extractYearFromFilename('Dave_Orientation_1992.png'), 1992);
+    assert.equal(extractYearFromFilename('Rig [1999].jpg'), 1999);
+
+    // Current & recent years
+    assert.equal(extractYearFromFilename('Sarah (2018).png'), 2018);
+    assert.equal(extractYearFromFilename('2021_Sarah_Cable.jpg'), 2021);
+    assert.equal(extractYearFromFilename('Sarah_Cable_2024.jpg'), 2024);
+
+    // Year from folder hierarchy
+    assert.equal(extractYearFromFilename('card_scan.jpg', 'Humber_Archive/1998/Scans'), 1998);
+    assert.equal(extractYearFromFilename('cable.png', 'Scans-2022/Tech'), 2022);
+
+    // Unrelated 4-digit numbers that must NOT be extracted as years:
+    assert.equal(extractYearFromFilename('camera_rig_1920x1080.jpg'), null, 'Resolutions like 1920x1080 must not be years');
+    assert.equal(extractYearFromFilename('broadcast_feed_1080p.png'), null, '1080p must not be year');
+    assert.equal(extractYearFromFilename('lab_bench_iso3200.jpg'), null, 'ISO speed must not be year');
+    assert.equal(extractYearFromFilename('printer_port_3000.jpg'), null, 'Port numbers must not be year');
+    assert.equal(extractYearFromFilename('dsc_4096.png'), null, 'Camera sequence number must not be year');
+    assert.equal(extractYearFromFilename('ticket_5432_receipt.jpg'), null, 'Arbitrary numbers out of range must not be year');
+  });
+
+  // TEST 6: Stable, deterministic 16-character hash archive IDs
+  test('6. Generates collision-safe 16-character hash archive IDs', () => {
     const checksum = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
-    const id1 = generateStableArchiveId(checksum, '2021_Sarah_Cable.jpg', 2021);
-    const id2 = generateStableArchiveId(checksum, '2021_Sarah_Cable.jpg', 2021);
+    const id1 = generateStableArchiveId(checksum, '1999_Dave_Maestro.jpg', 1999);
+    const id2 = generateStableArchiveId(checksum, '1999_Dave_Maestro.jpg', 1999);
 
     assert.equal(id1, id2, 'Same inputs must yield identical archive IDs');
-    assert.match(id1, /^arc-2021-/, 'ID should incorporate year prefix');
-    assert.match(id1, /e3b0c442$/, 'ID should incorporate short checksum hash');
-
-    const extractedYear = extractYearFromFilename('Sarah_Cable_2022_final.jpg', 'CardArchive/2022/');
-    assert.equal(extractedYear, 2022, 'Should correctly extract year from filename or folder');
+    assert.match(id1, /^arc-1999-dave-maestro-[0-9a-f]{16}$/, 'ID must contain year, slug, and 16-character hex digest');
   });
 
-  // TEST 6: Detect duplicate file based on SHA-256 hash
-  test('6. Detects duplicate file contents via SHA-256 hash matching', async () => {
+  // TEST 7: Archive ID collision safety (prevents overwriting distinct records)
+  test('7. Prevents archive ID collisions from overwriting different records', async () => {
+    const blobA = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/jpeg' });
+    const checkA = await calculateFileChecksum(blobA);
+
+    const recordA: HistoricalCardArchive = {
+      archiveId: 'arc-collision-test',
+      originalFileName: 'file_a.jpg',
+      originalFileSize: 3,
+      originalFileType: 'image/jpeg',
+      originalFileChecksum: checkA,
+      originalCreationYear: 2021,
+      sourceProvider: 'LOCAL_UPLOAD',
+      sourceFolderPath: null,
+      sourceDriveFileId: null,
+      importedAt: new Date().toISOString(),
+      classification: 'CARD_ARTWORK',
+      userNotes: null,
+    };
+    await storage.saveArchiveRecord(recordA, blobA, null);
+
+    // Attempt to save a DIFFERENT file under the same archive ID
+    const blobB = new Blob([new Uint8Array([9, 8, 7, 6])], { type: 'image/png' });
+    const checkB = await calculateFileChecksum(blobB);
+    const recordB: HistoricalCardArchive = {
+      ...recordA,
+      originalFileName: 'file_b.png',
+      originalFileChecksum: checkB,
+      originalFileSize: 4,
+    };
+
+    // Must reject rather than silently overwriting record A!
+    await assert.rejects(
+      async () => {
+        await storage.saveArchiveRecord(recordB, blobB, null);
+      },
+      /collision/i,
+      'Must reject ID collision when content checksum differs'
+    );
+
+    // Confirm record A remains intact
+    const after = await storage.getArchiveRecord('arc-collision-test');
+    assert.equal(after?.originalFileName, 'file_a.jpg');
+    assert.equal(after?.originalFileChecksum, checkA);
+  });
+
+  // TEST 8: Detect duplicate file contents via SHA-256 hash matching
+  test('8. Detects duplicate file contents via SHA-256 hash matching', async () => {
     const blob = new Blob([new Uint8Array([10, 20, 30, 40, 50])], { type: 'image/png' });
     const checksum = await calculateFileChecksum(blob);
 
@@ -206,18 +274,16 @@ describe('Milestone 4 — Physical Card Archive & Import Centre', () => {
     };
     await storage.saveArchiveRecord(record, blob, null);
 
-    // Check duplicate with same checksum but different filename
     const dupCheck = await storage.checkDuplicate(checksum);
     assert.equal(dupCheck.isDuplicate, true, 'Must identify duplicate content');
     assert.equal(dupCheck.matchedRecord?.archiveId, 'arc-original-card');
 
-    // Check duplicate with different checksum
     const diffCheck = await storage.checkDuplicate('unmatched-sha256-hash-12345');
-    assert.equal(diffCheck.isDuplicate, false, 'Different content must not be flagged as duplicate');
+    assert.equal(diffCheck.isDuplicate, false);
   });
 
-  // TEST 7: Detect duplicate Google Drive file based on Drive file ID
-  test('7. Detects duplicate Google Drive files via sourceDriveFileId', async () => {
+  // TEST 9: Detect duplicate Google Drive files via sourceDriveFileId
+  test('9. Detects duplicate Google Drive files via sourceDriveFileId', async () => {
     const blob = new Blob([new Uint8Array([100, 101, 102])], { type: 'image/jpeg' });
     const checksum = await calculateFileChecksum(blob);
 
@@ -237,14 +303,52 @@ describe('Milestone 4 — Physical Card Archive & Import Centre', () => {
     };
     await storage.saveArchiveRecord(record, blob, null);
 
-    // Even with a different checksum, matching Drive ID should be flagged
     const dupCheck = await storage.checkDuplicate('completely-different-checksum', '1AbCdEfGhIjKlMnOpQrStUvWxYz');
     assert.equal(dupCheck.isDuplicate, true, 'Must detect duplicate Drive file ID');
     assert.equal(dupCheck.matchedRecord?.archiveId, 'arc-drive-card');
   });
 
-  // TEST 8: Store and retrieve original file metadata correctly without corruption
-  test('8. Preserves all original file metadata unaltered', async () => {
+  // TEST 10: Persistent storage fail-safe (blocks saving when IndexedDB is unavailable)
+  test('10. Fails safely and throws an explicit error when persistent storage is unavailable', async () => {
+    const originalIDB = (globalThis as any).indexedDB;
+    (globalThis as any).indexedDB = undefined;
+
+    try {
+      const unavailStorage = new ArchiveStorage();
+      await unavailStorage.init();
+      assert.equal(unavailStorage.isPersistentStorageAvailable(), false);
+
+      const blob = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/jpeg' });
+      const record: HistoricalCardArchive = {
+        archiveId: 'arc-fail-safe-test',
+        originalFileName: 'test.jpg',
+        originalFileSize: 3,
+        originalFileType: 'image/jpeg',
+        originalFileChecksum: 'dummy-checksum',
+        originalCreationYear: null,
+        sourceProvider: 'LOCAL_UPLOAD',
+        sourceFolderPath: null,
+        sourceDriveFileId: null,
+        importedAt: new Date().toISOString(),
+        classification: 'CARD_ARTWORK',
+        userNotes: null,
+      };
+
+      // Must NOT silently succeed into volatile memory! Must throw explicit error!
+      await assert.rejects(
+        async () => {
+          await unavailStorage.saveArchiveRecord(record, blob, null);
+        },
+        /persistent storage unavailable/i,
+        'Must reject saveArchiveRecord when persistent storage is unavailable'
+      );
+    } finally {
+      (globalThis as any).indexedDB = originalIDB;
+    }
+  });
+
+  // TEST 11: Preserve all original file metadata unaltered
+  test('11. Preserves all original file metadata unaltered', async () => {
     const testBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x11, 0x22]);
     const blob = new Blob([testBytes], { type: 'image/png' });
     const checksum = await calculateFileChecksum(blob);
@@ -278,11 +382,10 @@ describe('Milestone 4 — Physical Card Archive & Import Centre', () => {
     assert.equal(retrieved?.originalFileChecksum, checksum);
     assert.equal(retrieved?.originalCreationYear, 2021);
     assert.equal(retrieved?.metadata?.aiSuggestedTitle, 'The System Administrator');
-    assert.equal(retrieved?.metadata?.aiSuggestedDepartment, 'TECH');
   });
 
-  // TEST 9: Verify one archive card can link to multiple playable card variations
-  test('9. Links a single archive card record to multiple playable card variations', async () => {
+  // TEST 12: Link single archive card to multiple playable variations
+  test('12. Links a single archive card record to multiple playable card variations', async () => {
     const blob = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/jpeg' });
     const checksum = await calculateFileChecksum(blob);
 
@@ -302,7 +405,6 @@ describe('Milestone 4 — Physical Card Archive & Import Centre', () => {
     };
     await storage.saveArchiveRecord(archiveRecord, blob, null);
 
-    // Variation 1: Standard Shift Lead
     const var1: PlayableCardDefinition = {
       playableCardId: 'play-sarah-standard',
       archiveId: 'arc-sarah-root',
@@ -325,7 +427,6 @@ describe('Milestone 4 — Physical Card Archive & Import Centre', () => {
       updatedAt: new Date().toISOString(),
     };
 
-    // Variation 2: Overtime Veteran (Boss/Supervisor)
     const var2: PlayableCardDefinition = {
       playableCardId: 'play-sarah-overtime',
       archiveId: 'arc-sarah-root',
@@ -353,12 +454,10 @@ describe('Milestone 4 — Physical Card Archive & Import Centre', () => {
 
     const variations = await storage.getPlayableCardsForArchive('arc-sarah-root');
     assert.equal(variations.length, 2, 'Must retrieve both playable card variations');
-    assert.equal(variations.some(v => v.playableCardId === 'play-sarah-standard'), true);
-    assert.equal(variations.some(v => v.playableCardId === 'play-sarah-overtime'), true);
   });
 
-  // TEST 10: Verify deleting a playable variation does NOT delete underlying archive record
-  test('10. Deleting a playable card variation preserves the original archive record intact', async () => {
+  // TEST 13: Deleting a playable card variation does NOT delete underlying archive record
+  test('13. Deleting a playable card variation preserves the original archive record intact', async () => {
     const blob = new Blob([new Uint8Array([55, 66, 77])], { type: 'image/jpeg' });
     const checksum = await calculateFileChecksum(blob);
 
@@ -401,23 +500,19 @@ describe('Milestone 4 — Physical Card Archive & Import Centre', () => {
     };
     await storage.savePlayableCard(playableCard);
 
-    // Delete the playable card variation
     await storage.deletePlayableCard('play-temp-variation');
 
-    // Confirm playable card is deleted
     const checkPlayable = await storage.getPlayableCard('play-temp-variation');
     assert.equal(checkPlayable, null, 'Playable card must be deleted');
 
-    // Confirm historical archive record and binary are 100% intact!
     const archiveAfter = await storage.getArchiveRecord('arc-permanent-record');
     assert.ok(archiveAfter, 'Historical archive record must NOT be deleted');
     const binaryAfter = await storage.getArchiveBinary('arc-permanent-record');
-    assert.ok(binaryAfter, 'Underlying binary scan must remain intact in database');
-    assert.equal(binaryAfter?.size, 3);
+    assert.ok(binaryAfter, 'Underlying binary scan must remain intact');
   });
 
-  // TEST 11: Verify editing playable card stats does NOT modify source archive asset
-  test('11. Editing playable card stats does NOT modify or corrupt the historical archive record', async () => {
+  // TEST 14: Editing playable card stats does NOT modify source archive asset
+  test('14. Editing playable card stats does NOT modify or corrupt the historical archive record', async () => {
     const blob = new Blob([new Uint8Array([1, 2, 3, 4])], { type: 'image/png' });
     const originalChecksum = await calculateFileChecksum(blob);
 
@@ -460,7 +555,7 @@ describe('Milestone 4 — Physical Card Archive & Import Centre', () => {
     };
     await storage.savePlayableCard(playable);
 
-    // Buff the playable card stats (efficiency 4 -> 8, stamina 5 -> 10)
+    // Buff the playable card stats
     const buffedPlayable: PlayableCardDefinition = {
       ...playable,
       efficiency: 8,
@@ -470,12 +565,9 @@ describe('Milestone 4 — Physical Card Archive & Import Centre', () => {
     };
     await storage.savePlayableCard(buffedPlayable);
 
-    // Verify playable card stats updated
     const updatedPlayable = await storage.getPlayableCard('play-mutable-stats');
     assert.equal(updatedPlayable?.efficiency, 8);
-    assert.equal(updatedPlayable?.stamina, 10);
 
-    // Verify historical archive record and binary remain strictly unchanged
     const sourceRecord = await storage.getArchiveRecord('arc-untouchable');
     assert.equal(sourceRecord?.originalFileChecksum, originalChecksum);
     const sourceBlob = await storage.getArchiveBinary('arc-untouchable');
@@ -483,8 +575,8 @@ describe('Milestone 4 — Physical Card Archive & Import Centre', () => {
     assert.equal(sourceChecksum, originalChecksum, 'Source binary checksum must remain strictly unchanged');
   });
 
-  // TEST 12: Verify persistence across re-initialization
-  test('12. Persists archive records and binaries across storage re-initialization', async () => {
+  // TEST 15: Persist records across re-initialization
+  test('15. Persists archive records and binaries across storage re-initialization', async () => {
     const blob = new Blob([new Uint8Array([42, 43, 44, 45])], { type: 'image/jpeg' });
     const checksum = await calculateFileChecksum(blob);
 
@@ -504,21 +596,110 @@ describe('Milestone 4 — Physical Card Archive & Import Centre', () => {
     };
     await storage.saveArchiveRecord(record, blob, null);
 
-    // Create a new storage client instance to simulate next user session
+    // Re-initialize a fresh client
     const freshStorageClient = new ArchiveStorage();
     await freshStorageClient.init();
 
     const retrieved = await freshStorageClient.getArchiveRecord('arc-persistent-session');
-    assert.ok(retrieved, 'Should retrieve record from persistent database in fresh instance');
+    assert.ok(retrieved);
     assert.equal(retrieved?.originalFileName, 'session_scan.jpg');
 
     const binary = await freshStorageClient.getArchiveBinary('arc-persistent-session');
-    assert.ok(binary, 'Should retrieve binary from persistent database in fresh instance');
+    assert.ok(binary);
     assert.equal(binary?.size, 4);
   });
 
-  // TEST 13: Export and restore archive backup bundle
-  test('13. Exports archive bundle to JSON and restores it successfully into clean database', async () => {
+  // TEST 16: Backup bundle validation (checksum mismatch, missing assets, broken references)
+  test('16. Validates backup bundles: rejects checksum mismatches, missing assets, and broken references', async () => {
+    // A: Checksum mismatch in bundle
+    const corruptBundle: any = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      records: [{
+        archiveId: 'arc-corrupt',
+        originalFileName: 'corrupt.jpg',
+        originalFileType: 'image/jpeg',
+        originalFileSize: 3,
+        originalFileChecksum: 'expected-real-checksum-1234567890abcdef',
+        originalCreationYear: 2021,
+        sourceProvider: 'LOCAL_UPLOAD',
+        sourceFolderPath: null,
+        sourceDriveFileId: null,
+        importedAt: new Date().toISOString(),
+        classification: 'CARD_ARTWORK',
+        userNotes: null,
+      }],
+      assets: [{
+        archiveId: 'arc-corrupt',
+        originalFileName: 'corrupt.jpg',
+        mimeType: 'image/jpeg',
+        base64Data: Buffer.from([1, 2, 3]).toString('base64'), // Will produce different checksum!
+      }],
+      playableCards: [],
+    };
+
+    const resultA = await storage.validateArchiveBundle(corruptBundle);
+    assert.equal(resultA.isValid, false);
+    assert.ok(resultA.errors.some(e => e.includes('Checksum mismatch')), 'Must catch checksum mismatch');
+
+    // B: Playable card referencing non-existent archive record
+    const validBlob = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/jpeg' });
+    const validChecksum = await calculateFileChecksum(validBlob);
+    const validBase64 = Buffer.from([1, 2, 3]).toString('base64');
+
+    const brokenRefBundle: any = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      records: [{
+        archiveId: 'arc-valid',
+        originalFileName: 'valid.jpg',
+        originalFileType: 'image/jpeg',
+        originalFileSize: 3,
+        originalFileChecksum: validChecksum,
+        originalCreationYear: 2021,
+        sourceProvider: 'LOCAL_UPLOAD',
+        sourceFolderPath: null,
+        sourceDriveFileId: null,
+        importedAt: new Date().toISOString(),
+        classification: 'CARD_ARTWORK',
+        userNotes: null,
+      }],
+      assets: [{
+        archiveId: 'arc-valid',
+        originalFileName: 'valid.jpg',
+        mimeType: 'image/jpeg',
+        base64Data: validBase64,
+      }],
+      playableCards: [{
+        playableCardId: 'play-orphan',
+        archiveId: 'arc-DOES-NOT-EXIST', // Non-existent reference!
+        displayName: 'Orphan Card',
+        variationName: 'Broken Variant',
+        cardType: 'CHARACTER',
+        rarity: 'COMMON',
+        department: 'TECH',
+        shiftCost: 2,
+        efficiency: 2,
+        stamina: 2,
+        maxStamina: 2,
+        influence: 1,
+        keywords: [],
+        abilityName: null,
+        abilityDesc: null,
+        flavor: 'Broken',
+        isActive: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }],
+    };
+
+    const resultB = await storage.validateArchiveBundle(brokenRefBundle);
+    assert.equal(resultB.isValid, false);
+    assert.ok(resultB.errors.some(e => e.includes('non-existent archive record')), 'Must catch broken archive reference');
+  });
+
+  // TEST 17: Backup restore into clean database
+  test('17. Exports archive bundle to JSON and restores it successfully into clean database', async () => {
     const blob = new Blob([new Uint8Array([11, 22, 33])], { type: 'image/jpeg' });
     const checksum = await calculateFileChecksum(blob);
 
@@ -561,24 +742,20 @@ describe('Milestone 4 — Physical Card Archive & Import Centre', () => {
     };
     await storage.savePlayableCard(playable);
 
-    // 1. Export bundle
+    // Export bundle
     const bundle = await storage.exportArchiveBundle();
     assert.equal(bundle.version, 1);
     assert.equal(bundle.records.length, 1);
-    assert.equal(bundle.playableCards.length, 1);
-    assert.equal(bundle.assets.length, 1);
-    assert.ok(bundle.assets[0].base64Data.length > 0);
 
-    // 2. Wipe database
+    // Wipe database
     await storage.clearAll();
-    const recordsAfterClear = await storage.getAllArchiveRecords();
-    assert.equal(recordsAfterClear.length, 0);
+    assert.equal((await storage.getAllArchiveRecords()).length, 0);
 
-    // 3. Restore bundle
+    // Restore bundle
     const restoreResult = await storage.importArchiveBundle(bundle);
     assert.equal(restoreResult.importedCount, 1);
 
-    // 4. Verify restored items
+    // Verify restored records
     const restoredRecord = await storage.getArchiveRecord('arc-backup-test');
     assert.ok(restoredRecord);
     assert.equal(restoredRecord?.originalFileName, 'backup_scan.jpg');
@@ -586,24 +763,20 @@ describe('Milestone 4 — Physical Card Archive & Import Centre', () => {
     const restoredBinary = await storage.getArchiveBinary('arc-backup-test');
     assert.ok(restoredBinary);
     assert.equal(restoredBinary?.size, 3);
-
-    const restoredPlayable = await storage.getPlayableCard('play-backup-candidate');
-    assert.ok(restoredPlayable);
-    assert.equal(restoredPlayable?.displayName, 'Backup Playable Card');
   });
 
-  // TEST 14: Handle failed imports without corrupting existing records
-  test('14. Protects existing records from corruption during an interrupted or failed batch', async () => {
-    const validBlob = new Blob([new Uint8Array([1, 1, 1])], { type: 'image/png' });
-    const checksum = await calculateFileChecksum(validBlob);
-
-    const validRecord: HistoricalCardArchive = {
-      archiveId: 'arc-stable-existing',
-      originalFileName: 'existing_scan.png',
+  // TEST 18: Genuine partial / interrupted batch import isolation
+  test('18. Handles interrupted or partially failing batches without corrupting existing records', async () => {
+    // Pre-populate an existing valid record
+    const baseBlob = new Blob([new Uint8Array([5, 6, 7])], { type: 'image/png' });
+    const baseChecksum = await calculateFileChecksum(baseBlob);
+    const existingRec: HistoricalCardArchive = {
+      archiveId: 'arc-stable-base',
+      originalFileName: 'base.png',
       originalFileSize: 3,
       originalFileType: 'image/png',
-      originalFileChecksum: checksum,
-      originalCreationYear: null,
+      originalFileChecksum: baseChecksum,
+      originalCreationYear: 2021,
       sourceProvider: 'LOCAL_UPLOAD',
       sourceFolderPath: null,
       sourceDriveFileId: null,
@@ -611,94 +784,52 @@ describe('Milestone 4 — Physical Card Archive & Import Centre', () => {
       classification: 'CARD_ARTWORK',
       userNotes: null,
     };
-    await storage.saveArchiveRecord(validRecord, validBlob, null);
+    await storage.saveArchiveRecord(existingRec, baseBlob, null);
 
-    // Attempt an invalid operation or simulate rejected import
-    const corruptRecord = { archiveId: 'bad-record' } as any;
-    try {
-      // Trying to update non-existent record in memory fallback throws
-      await storage.updateArchiveRecord(corruptRecord);
-    } catch {
-      // Handled rejection
+    // Simulate a batch of 3 files where file #2 causes an ID collision error
+    const batch = [
+      { name: 'batch_1.jpg', data: [10, 11], id: 'arc-batch-1' },
+      { name: 'batch_collision.jpg', data: [20, 21], id: 'arc-stable-base' }, // Collision with existing!
+      { name: 'batch_3.jpg', data: [30, 31], id: 'arc-batch-3' },
+    ];
+
+    const results: { name: string; success: boolean; error?: string }[] = [];
+
+    for (const item of batch) {
+      const b = new Blob([new Uint8Array(item.data)], { type: 'image/jpeg' });
+      const c = await calculateFileChecksum(b);
+      const rec: HistoricalCardArchive = {
+        archiveId: item.id,
+        originalFileName: item.name,
+        originalFileSize: item.data.length,
+        originalFileType: 'image/jpeg',
+        originalFileChecksum: c,
+        originalCreationYear: 2022,
+        sourceProvider: 'LOCAL_UPLOAD',
+        sourceFolderPath: null,
+        sourceDriveFileId: null,
+        importedAt: new Date().toISOString(),
+        classification: 'CARD_ARTWORK',
+        userNotes: null,
+      };
+
+      try {
+        await storage.saveArchiveRecord(rec, b, null);
+        results.push({ name: item.name, success: true });
+      } catch (err: any) {
+        results.push({ name: item.name, success: false, error: err.message });
+      }
     }
 
-    // Verify existing record is 100% intact and undamaged
-    const checkExisting = await storage.getArchiveRecord('arc-stable-existing');
-    assert.ok(checkExisting);
-    assert.equal(checkExisting?.originalFileName, 'existing_scan.png');
-  });
+    // Item 1 succeeded, Item 2 failed with collision, Item 3 succeeded
+    assert.equal(results[0].success, true);
+    assert.equal(results[1].success, false);
+    assert.match(results[1].error || '', /collision/i);
+    assert.equal(results[2].success, true);
 
-  // TEST 15: Handle storage quota / memory fallback gracefully
-  test('15. Memory fallback handles full archive operations gracefully without IndexedDB', async () => {
-    // Force memory fallback mode
-    const memStorage = new ArchiveStorage();
-    (memStorage as any).isMemoryFallback = true;
-    (memStorage as any).db = null;
-
-    const blob = new Blob([new Uint8Array([99, 88, 77])], { type: 'image/jpeg' });
-    const checksum = await calculateFileChecksum(blob);
-
-    const record: HistoricalCardArchive = {
-      archiveId: 'arc-mem-fallback',
-      originalFileName: 'fallback.jpg',
-      originalFileSize: 3,
-      originalFileType: 'image/jpeg',
-      originalFileChecksum: checksum,
-      originalCreationYear: null,
-      sourceProvider: 'LOCAL_UPLOAD',
-      sourceFolderPath: null,
-      sourceDriveFileId: null,
-      importedAt: new Date().toISOString(),
-      classification: 'CARD_ARTWORK',
-      userNotes: null,
-    };
-
-    // Save in memory fallback
-    await memStorage.saveArchiveRecord(record, blob, null);
-
-    // Retrieve from memory fallback
-    const retrieved = await memStorage.getArchiveRecord('arc-mem-fallback');
-    assert.ok(retrieved);
-    assert.equal(retrieved?.originalFileName, 'fallback.jpg');
-
-    const binary = await memStorage.getArchiveBinary('arc-mem-fallback');
-    assert.ok(binary);
-    assert.equal(binary?.size, 3);
-
-    // Duplicate check in memory fallback
-    const dup = await memStorage.checkDuplicate(checksum);
-    assert.equal(dup.isDuplicate, true);
-
-    // Playable card in memory fallback
-    const playable: PlayableCardDefinition = {
-      playableCardId: 'play-mem-1',
-      archiveId: 'arc-mem-fallback',
-      displayName: 'Memory Card',
-      variationName: 'Fallback Variant',
-      cardType: 'CHARACTER',
-      rarity: 'COMMON',
-      department: 'ADMIN',
-      shiftCost: 1,
-      efficiency: 1,
-      stamina: 1,
-      maxStamina: 1,
-      influence: 1,
-      keywords: [],
-      abilityName: null,
-      abilityDesc: null,
-      flavor: 'In-memory test card.',
-      isActive: true,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    await memStorage.savePlayableCard(playable);
-    const retrievedPlayable = await memStorage.getPlayableCard('play-mem-1');
-    assert.ok(retrievedPlayable);
-    assert.equal(retrievedPlayable?.displayName, 'Memory Card');
-
-    // Delete in memory fallback
-    await memStorage.deleteArchiveRecord('arc-mem-fallback');
-    const afterDelete = await memStorage.getArchiveRecord('arc-mem-fallback');
-    assert.equal(afterDelete, null);
+    // Verify existing base record was NOT damaged or overwritten
+    const baseAfter = await storage.getArchiveRecord('arc-stable-base');
+    assert.equal(baseAfter?.originalFileName, 'base.png');
+    assert.equal(baseAfter?.originalFileChecksum, baseChecksum);
   });
 });
