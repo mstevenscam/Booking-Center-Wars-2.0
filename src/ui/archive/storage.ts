@@ -15,6 +15,7 @@ import {
   HistoricalCardArchive, 
   PlayableCardDefinition, 
   ArchiveExportBundle,
+  ArchiveExportAsset,
   StorageStatus,
   BundleValidationResult,
   ArchiveAssetProvenance
@@ -41,6 +42,9 @@ export class ArchiveStorage {
   private initError: string | null = null;
   private isDevMemoryMode = false;
 
+  public migrationStatus: 'IDLE' | 'COMPLETED' | 'FAILED' = 'IDLE';
+  public migrationError: string | null = null;
+
   // In-memory fallback structures (strictly for unit tests or explicit dev mode)
   private memRecords = new Map<string, HistoricalCardArchive>();
   private memBinaries = new Map<string, { archiveId: string; blob: Blob; checksum: string }>();
@@ -63,6 +67,8 @@ export class ArchiveStorage {
       isPersistent: this.isPersistent,
       storageEngine: this.isPersistent ? 'INDEXED_DB' : 'UNAVAILABLE',
       error: this.initError,
+      migrationStatus: this.migrationStatus,
+      migrationError: this.migrationError,
       isDevMemoryMode: this.isDevMemoryMode,
     };
   }
@@ -71,9 +77,34 @@ export class ArchiveStorage {
     return this.isPersistent;
   }
 
+  /**
+   * Allows retrying an interrupted or failed storage migration.
+   */
+  public async retryMigration(): Promise<void> {
+    if (!this.db && !this.isDevMemoryMode) {
+      await this.init();
+      if (this.migrationStatus === 'COMPLETED') return;
+    }
+    try {
+      await this.migratePhysicalCardAssets();
+      this.migrationStatus = 'COMPLETED';
+      this.migrationError = null;
+      this.initError = null;
+      this.isPersistent = true;
+    } catch (err: any) {
+      this.migrationStatus = 'FAILED';
+      this.migrationError = err?.message || String(err);
+      this.initError = `Storage migration failed: ${this.migrationError}. Storage operations paused to protect archive integrity.`;
+      this.isPersistent = false;
+      throw err;
+    }
+  }
+
   public async init(): Promise<void> {
     if (this.db) {
-      this.isPersistent = true;
+      if (this.migrationStatus !== 'FAILED') {
+        this.isPersistent = true;
+      }
       return;
     }
 
@@ -121,12 +152,18 @@ export class ArchiveStorage {
 
         req.onsuccess = async () => {
           this.db = req.result;
-          this.isPersistent = true;
           this.initError = null;
           try {
             await this.migratePhysicalCardAssets();
-          } catch (mErr) {
-            console.warn('Migration check warning:', mErr);
+            this.migrationStatus = 'COMPLETED';
+            this.migrationError = null;
+            this.isPersistent = true;
+          } catch (mErr: any) {
+            this.isPersistent = false;
+            this.migrationStatus = 'FAILED';
+            this.migrationError = mErr?.message || String(mErr);
+            this.initError = `Storage migration failed: ${this.migrationError}. Storage operations paused to protect archive integrity.`;
+            console.error('Persistent storage migration failed:', mErr);
           }
           resolve();
         };
@@ -486,11 +523,15 @@ export class ArchiveStorage {
   }
 
   public async getArchiveBinary(archiveId: string): Promise<Blob | null> {
-    return this.getArchiveBinaryForSide(archiveId, 'FRONT');
+    const front = await this.getArchiveBinaryForSide(archiveId, 'FRONT');
+    if (front) return front;
+    return this.getArchiveBinaryForSide(archiveId, 'BACK');
   }
 
   public async getArchiveThumbnail(archiveId: string): Promise<Blob | null> {
-    return this.getArchiveThumbnailForSide(archiveId, 'FRONT');
+    const front = await this.getArchiveThumbnailForSide(archiveId, 'FRONT');
+    if (front) return front;
+    return this.getArchiveThumbnailForSide(archiveId, 'BACK');
   }
 
   /**
@@ -505,11 +546,12 @@ export class ArchiveStorage {
     let storageKey = archiveId;
 
     if (record) {
-      const resolved = resolveAssetBinaryKey(record, side);
-      if (resolved) {
+      if (record.frontAsset || record.backAsset) {
+        const resolved = resolveAssetBinaryKey(record, side);
+        if (!resolved) {
+          return null; // Side does not exist on this record
+        }
         storageKey = resolved;
-      } else if (side === 'BACK') {
-        return null; // No back asset attached to this record
       }
     }
 
@@ -539,11 +581,12 @@ export class ArchiveStorage {
     let storageKey = archiveId;
 
     if (record) {
-      const resolved = resolveAssetBinaryKey(record, side);
-      if (resolved) {
+      if (record.frontAsset || record.backAsset) {
+        const resolved = resolveAssetBinaryKey(record, side);
+        if (!resolved) {
+          return null; // Side does not exist on this record
+        }
         storageKey = resolved;
-      } else if (side === 'BACK') {
-        return null;
       }
     }
 
@@ -702,6 +745,21 @@ export class ArchiveStorage {
             this.memRecords.set(id, normalizeArchiveRecord(updated));
           }
         }
+        this.memRecords.set(MIGRATION_VERSION_MARKER, {
+          archiveId: MIGRATION_VERSION_MARKER,
+          schemaVersion: 2,
+          originalFileName: 'MIGRATION_MARKER',
+          originalFileType: 'application/json',
+          originalFileSize: 0,
+          originalFileChecksum: 'none',
+          sourceProvider: 'LOCAL_UPLOAD',
+          sourceFolderPath: null,
+          sourceDriveFileId: null,
+          importedAt: new Date().toISOString(),
+          classification: 'OTHER_ASSET',
+          userNotes: `Migrated at ${new Date().toISOString()}`,
+          originalCreationYear: null,
+        });
       }
       return;
     }
@@ -722,60 +780,72 @@ export class ArchiveStorage {
 
           const allReq = store.getAll();
           allReq.onsuccess = () => {
-            const records: HistoricalCardArchive[] = allReq.result || [];
-            for (const rec of records) {
-              if (rec.archiveId.startsWith('__')) continue;
-              if (!rec.frontAsset && !rec.backAsset) {
-                const sideAnalysis = analyzeCardFilename(rec.originalFileName);
-                const asset: ArchiveAssetProvenance = {
-                  assetId: generateAssetId(),
-                  side: sideAnalysis.side,
-                  binaryStorageKey: rec.archiveId,
-                  fileName: rec.originalFileName,
-                  fileType: rec.originalFileType,
-                  fileSize: rec.originalFileSize,
-                  fileChecksum: rec.originalFileChecksum,
-                  sourceProvider: rec.sourceProvider,
-                  sourceFolderPath: rec.sourceFolderPath,
-                  sourceDriveFileId: rec.sourceDriveFileId,
-                  importedAt: rec.importedAt,
-                };
+            try {
+              const records: HistoricalCardArchive[] = allReq.result || [];
+              for (const rec of records) {
+                if (rec.archiveId.startsWith('__')) continue;
+                if (!rec.frontAsset && !rec.backAsset) {
+                  const sideAnalysis = analyzeCardFilename(rec.originalFileName);
+                  const asset: ArchiveAssetProvenance = {
+                    assetId: generateAssetId(),
+                    side: sideAnalysis.side,
+                    binaryStorageKey: rec.archiveId,
+                    fileName: rec.originalFileName,
+                    fileType: rec.originalFileType,
+                    fileSize: rec.originalFileSize,
+                    fileChecksum: rec.originalFileChecksum,
+                    sourceProvider: rec.sourceProvider,
+                    sourceFolderPath: rec.sourceFolderPath,
+                    sourceDriveFileId: rec.sourceDriveFileId,
+                    importedAt: rec.importedAt,
+                  };
 
-                const updated: HistoricalCardArchive = {
-                  ...rec,
-                  schemaVersion: 2,
-                  frontAsset: sideAnalysis.side === 'BACK' ? null : asset,
-                  backAsset: sideAnalysis.side === 'BACK' ? asset : null,
-                };
+                  const updated: HistoricalCardArchive = {
+                    ...rec,
+                    schemaVersion: 2,
+                    frontAsset: sideAnalysis.side === 'BACK' ? null : asset,
+                    backAsset: sideAnalysis.side === 'BACK' ? asset : null,
+                  };
 
-                store.put(normalizeArchiveRecord(updated));
+                  store.put(normalizeArchiveRecord(updated));
+                }
               }
-            }
 
-            // Set isolated migration marker
-            store.put({
-              archiveId: MIGRATION_VERSION_MARKER,
-              schemaVersion: 2,
-              migratedAt: new Date().toISOString(),
-              originalFileName: 'MIGRATION_MARKER',
-              originalFileType: 'application/json',
-              originalFileSize: 0,
-              originalFileChecksum: 'none',
-              sourceProvider: 'LOCAL_UPLOAD',
-              sourceFolderPath: null,
-              sourceDriveFileId: null,
-              importedAt: new Date().toISOString(),
-              classification: 'OTHER_ASSET',
-              userNotes: null,
-            });
+              // Set isolated migration marker ONLY after all records are written
+              store.put({
+                archiveId: MIGRATION_VERSION_MARKER,
+                schemaVersion: 2,
+                originalFileName: 'MIGRATION_MARKER',
+                originalFileType: 'application/json',
+                originalFileSize: 0,
+                originalFileChecksum: 'none',
+                sourceProvider: 'LOCAL_UPLOAD',
+                sourceFolderPath: null,
+                sourceDriveFileId: null,
+                importedAt: new Date().toISOString(),
+                classification: 'OTHER_ASSET',
+                userNotes: `Migrated at ${new Date().toISOString()}`,
+                originalCreationYear: null,
+              });
+            } catch (pErr) {
+              tx.abort();
+              reject(pErr);
+            }
           };
 
-          allReq.onerror = () => reject(allReq.error);
+          allReq.onerror = () => {
+            tx.abort();
+            reject(allReq.error);
+          };
         };
 
-        markerReq.onerror = () => reject(markerReq.error);
+        markerReq.onerror = () => {
+          tx.abort();
+          reject(markerReq.error);
+        };
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(new Error('Migration transaction aborted.'));
       } catch (err) {
         reject(err);
       }
@@ -798,6 +868,13 @@ export class ArchiveStorage {
     primarySide: 'FRONT' | 'BACK' = 'FRONT',
     secondarySide: 'FRONT' | 'BACK' = 'BACK'
   ): Promise<HistoricalCardArchive> {
+    if (primaryId === secondaryId) {
+      throw new Error('Cannot link record to itself');
+    }
+    if (primarySide === secondarySide) {
+      throw new Error(`Cannot link: primary and secondary cannot have the same side (${primarySide})`);
+    }
+
     await this.init();
 
     if (!this.isPersistent || !this.db) {
@@ -806,12 +883,37 @@ export class ArchiveStorage {
         const prim = this.memRecords.get(primaryId);
         const sec = this.memRecords.get(secondaryId);
         if (!prim || !sec) throw new Error('Cannot link: one or both records do not exist');
-        if (prim.backAsset) throw new Error('Primary card already has a back asset attached');
 
-        const secBin = this.memBinaries.get(sec.archiveId);
-        if (!secBin) throw new Error('Cannot link: secondary binary not found');
+        if (prim.classification !== 'CARD_ARTWORK' || sec.classification !== 'CARD_ARTWORK') {
+          throw new Error(
+            `Cannot link: only CARD_ARTWORK records can be paired into physical cards (found ${prim.classification} and ${sec.classification})`
+          );
+        }
 
-        const secThumb = this.memThumbnails.get(sec.archiveId);
+        if (prim.backAsset) throw new Error(`Primary card '${prim.originalFileName}' already has a back asset attached.`);
+        if (sec.frontAsset && sec.backAsset) throw new Error(`Secondary card '${sec.originalFileName}' already contains two sides.`);
+
+        if (
+          prim.frontAsset?.side === 'UNKNOWN' ||
+          sec.frontAsset?.side === 'UNKNOWN' ||
+          sec.backAsset?.side === 'UNKNOWN'
+        ) {
+          throw new Error('Cannot link record with UNKNOWN side. Please classify the card side before linking.');
+        }
+
+        if (prim.frontAsset && (prim.frontAsset.side as any) !== primarySide) {
+          throw new Error(`Primary record side conflict: record is designated as ${prim.frontAsset.side} but requested as ${primarySide}`);
+        }
+        const secSide = sec.backAsset?.side || sec.frontAsset?.side;
+        if (secSide && (secSide as any) !== secondarySide) {
+          throw new Error(`Secondary record side conflict: record is designated as ${secSide} but requested as ${secondarySide}`);
+        }
+
+        const secBinKey = sec.backAsset?.binaryStorageKey || sec.frontAsset?.binaryStorageKey || sec.archiveId;
+        const secBin = this.memBinaries.get(secBinKey);
+        if (!secBin) throw new Error(`Cannot link: secondary binary not found for '${secondaryId}'`);
+
+        const secThumb = this.memThumbnails.get(secBinKey) || this.memThumbnails.get(sec.archiveId);
         const secPlayable = Array.from(this.memPlayable.values()).filter(p => p.archiveId === secondaryId);
 
         const newBackAssetId = generateAssetId();
@@ -819,10 +921,10 @@ export class ArchiveStorage {
           assetId: newBackAssetId,
           side: secondarySide,
           binaryStorageKey: newBackAssetId,
-          fileName: sec.originalFileName,
-          fileType: sec.originalFileType,
-          fileSize: sec.originalFileSize,
-          fileChecksum: sec.originalFileChecksum,
+          fileName: sec.backAsset?.fileName || sec.frontAsset?.fileName || sec.originalFileName,
+          fileType: sec.backAsset?.fileType || sec.frontAsset?.fileType || sec.originalFileType,
+          fileSize: sec.backAsset?.fileSize ?? sec.frontAsset?.fileSize ?? sec.originalFileSize,
+          fileChecksum: sec.backAsset?.fileChecksum || sec.frontAsset?.fileChecksum || sec.originalFileChecksum,
           sourceProvider: sec.sourceProvider,
           sourceFolderPath: sec.sourceFolderPath,
           sourceDriveFileId: sec.sourceDriveFileId,
@@ -846,7 +948,7 @@ export class ArchiveStorage {
         this.memBinaries.set(newBackAssetId, {
           archiveId: newBackAssetId,
           blob: secBin.blob,
-          checksum: sec.originalFileChecksum,
+          checksum: backAsset.fileChecksum,
         });
         if (secThumb) {
           this.memThumbnails.set(newBackAssetId, secThumb);
@@ -858,7 +960,13 @@ export class ArchiveStorage {
 
         this.memRecords.delete(secondaryId);
         this.memBinaries.delete(secondaryId);
+        if (secBinKey !== secondaryId) {
+          this.memBinaries.delete(secBinKey);
+        }
         this.memThumbnails.delete(secondaryId);
+        if (secBinKey !== secondaryId) {
+          this.memThumbnails.delete(secBinKey);
+        }
 
         const normalized = normalizeArchiveRecord(updatedPrimary);
         this.memRecords.set(primaryId, normalized);
@@ -890,9 +998,27 @@ export class ArchiveStorage {
             return;
           }
 
+          if (prim.classification !== 'CARD_ARTWORK') {
+            tx.abort();
+            reject(new Error(`Cannot link: primary record is not CARD_ARTWORK (found ${prim.classification})`));
+            return;
+          }
+
           if (prim.backAsset) {
             tx.abort();
             reject(new Error(`Primary card '${prim.originalFileName}' already has a back asset attached.`));
+            return;
+          }
+
+          if (prim.frontAsset?.side === 'UNKNOWN') {
+            tx.abort();
+            reject(new Error('Cannot link record with UNKNOWN side. Please classify the card side before linking.'));
+            return;
+          }
+
+          if (prim.frontAsset && (prim.frontAsset.side as any) !== primarySide) {
+            tx.abort();
+            reject(new Error(`Primary record side conflict: record is designated as ${prim.frontAsset.side} but requested as ${primarySide}`));
             return;
           }
 
@@ -904,8 +1030,33 @@ export class ArchiveStorage {
               return;
             }
 
+            if (sec.classification !== 'CARD_ARTWORK') {
+              tx.abort();
+              reject(new Error(`Cannot link: secondary record is not CARD_ARTWORK (found ${sec.classification})`));
+              return;
+            }
+
+            if (sec.frontAsset && sec.backAsset) {
+              tx.abort();
+              reject(new Error(`Secondary card '${sec.originalFileName}' already contains two sides.`));
+              return;
+            }
+
+            if (sec.frontAsset?.side === 'UNKNOWN' || sec.backAsset?.side === 'UNKNOWN') {
+              tx.abort();
+              reject(new Error('Cannot link record with UNKNOWN side. Please classify the card side before linking.'));
+              return;
+            }
+
+            const secSide = sec.backAsset?.side || sec.frontAsset?.side;
+            if (secSide && (secSide as any) !== secondarySide) {
+              tx.abort();
+              reject(new Error(`Secondary record side conflict: record is designated as ${secSide} but requested as ${secondarySide}`));
+              return;
+            }
+
             // In-transaction check for secondary binary
-            const secBinKey = sec.archiveId;
+            const secBinKey = sec.backAsset?.binaryStorageKey || sec.frontAsset?.binaryStorageKey || sec.archiveId;
             const binReq = binaryStore.get(secBinKey);
 
             binReq.onsuccess = () => {
@@ -932,10 +1083,10 @@ export class ArchiveStorage {
                     assetId: newBackAssetId,
                     side: secondarySide,
                     binaryStorageKey: newBackAssetId,
-                    fileName: sec.originalFileName,
-                    fileType: sec.originalFileType,
-                    fileSize: sec.originalFileSize,
-                    fileChecksum: sec.originalFileChecksum,
+                    fileName: sec.backAsset?.fileName || sec.frontAsset?.fileName || sec.originalFileName,
+                    fileType: sec.backAsset?.fileType || sec.frontAsset?.fileType || sec.originalFileType,
+                    fileSize: sec.backAsset?.fileSize ?? sec.frontAsset?.fileSize ?? sec.originalFileSize,
+                    fileChecksum: sec.backAsset?.fileChecksum || sec.frontAsset?.fileChecksum || sec.originalFileChecksum,
                     sourceProvider: sec.sourceProvider,
                     sourceFolderPath: sec.sourceFolderPath,
                     sourceDriveFileId: sec.sourceDriveFileId,
@@ -960,9 +1111,9 @@ export class ArchiveStorage {
                   binaryStore.put({
                     archiveId: newBackAssetId,
                     blob: binEntry.blob,
-                    checksum: sec.originalFileChecksum,
-                    originalFileName: sec.originalFileName,
-                    originalFileType: sec.originalFileType,
+                    checksum: backAsset.fileChecksum,
+                    originalFileName: backAsset.fileName,
+                    originalFileType: backAsset.fileType,
                   });
 
                   // 2. Store secondary thumbnail under back asset UUID
@@ -988,7 +1139,13 @@ export class ArchiveStorage {
                   // 5. Delete secondary standalone entries
                   recordStore.delete(secondaryId);
                   binaryStore.delete(secBinKey);
+                  if (secBinKey !== secondaryId) {
+                    binaryStore.delete(secondaryId);
+                  }
                   thumbStore.delete(secBinKey);
+                  if (secBinKey !== secondaryId) {
+                    thumbStore.delete(secondaryId);
+                  }
 
                   tx.oncomplete = () => resolve(normalized);
                 };
@@ -1234,33 +1391,42 @@ export class ArchiveStorage {
     const records = await this.getAllArchiveRecords();
     const playableCards = await this.getAllPlayableCards();
 
-    const assets: ArchiveExportBundle['assets'] = [];
+    const assets: ArchiveExportAsset[] = [];
 
     for (const record of records) {
-      const binaryBlob = await this.getArchiveBinary(record.archiveId);
-      if (binaryBlob) {
-        const base64Data = await blobToBase64(binaryBlob);
+      // 1. Front asset binary
+      const frontBinaryBlob = await this.getArchiveBinaryForSide(record.archiveId, 'FRONT');
+      if (frontBinaryBlob) {
+        const base64Data = await blobToBase64(frontBinaryBlob);
+        const frontKey = record.frontAsset?.binaryStorageKey || record.archiveId;
         assets.push({
-          archiveId: record.archiveId,
-          originalFileName: record.originalFileName,
-          mimeType: record.originalFileType,
+          archiveId: frontKey,
+          assetId: record.frontAsset?.assetId,
+          side: record.frontAsset?.side || 'FRONT',
+          originalFileName: record.frontAsset?.fileName || record.originalFileName,
+          mimeType: record.frontAsset?.fileType || record.originalFileType,
+          fileSize: record.frontAsset?.fileSize ?? frontBinaryBlob.size,
+          checksum: record.frontAsset?.fileChecksum || record.originalFileChecksum,
           base64Data,
         });
       }
 
+      // 2. Back asset binary for paired cards
       if (record.backAsset) {
         const backKey = record.backAsset.binaryStorageKey || record.backAsset.assetId;
-        if (backKey !== record.archiveId) {
-          const backBlob = await this.getArchiveBinaryForSide(record.archiveId, 'BACK');
-          if (backBlob) {
-            const base64Data = await blobToBase64(backBlob);
-            assets.push({
-              archiveId: backKey,
-              originalFileName: record.backAsset.fileName,
-              mimeType: record.backAsset.fileType,
-              base64Data,
-            });
-          }
+        const backBinaryBlob = await this.getArchiveBinaryForSide(record.archiveId, 'BACK');
+        if (backBinaryBlob) {
+          const base64Data = await blobToBase64(backBinaryBlob);
+          assets.push({
+            archiveId: backKey,
+            assetId: record.backAsset.assetId,
+            side: record.backAsset.side || 'BACK',
+            originalFileName: record.backAsset.fileName,
+            mimeType: record.backAsset.fileType,
+            fileSize: record.backAsset.fileSize ?? backBinaryBlob.size,
+            checksum: record.backAsset.fileChecksum,
+            base64Data,
+          });
         }
       }
     }
@@ -1276,6 +1442,7 @@ export class ArchiveStorage {
 
   /**
    * Validates archive backup bundle structure, SHA-256 checksums, and reference integrity.
+   * Independently validates both front and back assets for paired records.
    */
   public async validateArchiveBundle(bundle: any): Promise<BundleValidationResult> {
     const errors: string[] = [];
@@ -1320,10 +1487,10 @@ export class ArchiveStorage {
     }
 
     const records: HistoricalCardArchive[] = bundle.records;
-    const assets: ArchiveExportBundle['assets'] = bundle.assets;
+    const assets: ArchiveExportAsset[] = bundle.assets;
     const playableCards: PlayableCardDefinition[] = bundle.playableCards;
 
-    // 1. Verify every archive record has an asset and valid checksum
+    // Verify every archive record has an asset and valid checksum
     const existingDbRecords = await this.getAllArchiveRecords();
     const existingArchiveIds = new Set(existingDbRecords.map(r => r.archiveId));
     const bundleArchiveIds = new Set(records.map(r => r.archiveId));
@@ -1334,32 +1501,66 @@ export class ArchiveStorage {
         continue;
       }
 
-      const asset = assets.find(a => a.archiveId === rec.archiveId);
-      if (!asset) {
-        errors.push(`Missing original asset binary for record '${rec.originalFileName}' (${rec.archiveId}).`);
-        continue;
-      }
+      // Check Front Asset (or primary single-sided asset)
+      const frontKey = rec.frontAsset?.binaryStorageKey || rec.archiveId;
+      const frontAsset = assets.find(a => 
+        a.archiveId === frontKey || 
+        (rec.frontAsset && a.assetId === rec.frontAsset.assetId) ||
+        (a.archiveId === rec.archiveId && a.side !== 'BACK')
+      );
 
-      if (!asset.base64Data || typeof asset.base64Data !== 'string') {
-        errors.push(`Asset for '${rec.originalFileName}' contains corrupted or empty base64 payload.`);
-        continue;
-      }
-
-      // Cryptographic verification of asset content
-      try {
-        const blob = base64ToBlob(asset.base64Data, asset.mimeType);
-        const actualChecksum = await calculateFileChecksum(blob);
-        if (actualChecksum !== rec.originalFileChecksum) {
-          errors.push(
-            `Checksum mismatch on '${rec.originalFileName}': calculated ${actualChecksum} vs recorded ${rec.originalFileChecksum}. Data may be corrupted.`
-          );
+      if (!frontAsset) {
+        errors.push(`Missing front asset binary for record '${rec.originalFileName}' (${rec.archiveId}).`);
+      } else if (!frontAsset.base64Data || typeof frontAsset.base64Data !== 'string') {
+        errors.push(`Front asset for '${rec.originalFileName}' contains corrupted or empty base64 payload.`);
+      } else {
+        // Cryptographic verification of front asset content
+        try {
+          const blob = base64ToBlob(frontAsset.base64Data, frontAsset.mimeType);
+          const actualChecksum = await calculateFileChecksum(blob);
+          const expectedChecksum = rec.frontAsset?.fileChecksum || rec.originalFileChecksum;
+          if (actualChecksum !== expectedChecksum) {
+            errors.push(
+              `Checksum mismatch on front asset of '${rec.originalFileName}': calculated ${actualChecksum} vs recorded ${expectedChecksum}. Data may be corrupted.`
+            );
+          }
+        } catch (err: any) {
+          errors.push(`Failed to decode base64 binary for front asset of '${rec.originalFileName}': ${err.message}`);
         }
-      } catch (err: any) {
-        errors.push(`Failed to decode base64 binary for '${rec.originalFileName}': ${err.message}`);
+      }
+
+      // Check Back Asset if record is paired
+      if (rec.backAsset) {
+        const backKey = rec.backAsset.binaryStorageKey || rec.backAsset.assetId;
+        const backAsset = assets.find(a => 
+          a.archiveId === backKey || 
+          a.assetId === rec.backAsset?.assetId ||
+          (a.side === 'BACK' && (a.archiveId === backKey || a.archiveId === rec.archiveId))
+        );
+
+        if (!backAsset) {
+          errors.push(`Missing back asset binary for paired card '${rec.originalFileName}' (${rec.archiveId}, back key: ${backKey}).`);
+        } else if (!backAsset.base64Data || typeof backAsset.base64Data !== 'string') {
+          errors.push(`Back asset for '${rec.originalFileName}' contains corrupted or empty base64 payload.`);
+        } else {
+          // Cryptographic verification of back asset content
+          try {
+            const blob = base64ToBlob(backAsset.base64Data, backAsset.mimeType);
+            const actualChecksum = await calculateFileChecksum(blob);
+            const expectedChecksum = rec.backAsset.fileChecksum;
+            if (actualChecksum !== expectedChecksum) {
+              errors.push(
+                `Checksum mismatch on back asset of '${rec.originalFileName}': calculated ${actualChecksum} vs recorded ${expectedChecksum}. Data may be corrupted.`
+              );
+            }
+          } catch (err: any) {
+            errors.push(`Failed to decode base64 binary for back asset of '${rec.originalFileName}': ${err.message}`);
+          }
+        }
       }
     }
 
-    // 2. Verify all playable cards point to existing or incoming archive records
+    // Verify all playable cards point to existing or incoming archive records
     for (const card of playableCards) {
       if (!card.playableCardId || !card.displayName) {
         errors.push(`Playable card definition missing ID or displayName.`);
@@ -1390,6 +1591,8 @@ export class ArchiveStorage {
   /**
    * Imports a backup bundle after full validation.
    * Restoring never silently overwrites existing records.
+   * Restores paired physical card records with both front and back binaries atomically.
+   * On any failure during restoration, rolls back all newly inserted records and playables.
    */
   public async importArchiveBundle(
     bundle: ArchiveExportBundle
@@ -1402,36 +1605,98 @@ export class ArchiveStorage {
     let importedCount = 0;
     let skippedDuplicates = 0;
 
-    for (const rec of bundle.records) {
-      const dup = await this.checkDuplicate(rec.originalFileChecksum, rec.sourceDriveFileId);
-      if (dup.isDuplicate) {
-        skippedDuplicates++;
-        continue;
+    const insertedArchiveIds: string[] = [];
+    const insertedPlayableIds: string[] = [];
+
+    try {
+      for (const rec of bundle.records) {
+        const dup = await this.checkDuplicate(rec.originalFileChecksum, rec.sourceDriveFileId);
+        if (dup.isDuplicate) {
+          skippedDuplicates++;
+          continue;
+        }
+
+        // Check if archiveId is already registered
+        const existing = await this.getArchiveRecord(rec.archiveId);
+        if (existing) {
+          skippedDuplicates++;
+          continue;
+        }
+
+        if (rec.frontAsset && rec.backAsset) {
+          // Paired physical card restoration
+          const frontKey = rec.frontAsset.binaryStorageKey || rec.archiveId;
+          const backKey = rec.backAsset.binaryStorageKey || rec.backAsset.assetId;
+
+          const frontAsset = bundle.assets.find(a => 
+            a.archiveId === frontKey || 
+            a.assetId === rec.frontAsset?.assetId ||
+            (a.archiveId === rec.archiveId && a.side !== 'BACK')
+          );
+          const backAsset = bundle.assets.find(a => 
+            a.archiveId === backKey || 
+            a.assetId === rec.backAsset?.assetId ||
+            (a.side === 'BACK' && (a.archiveId === backKey || a.archiveId === rec.archiveId))
+          );
+
+          if (!frontAsset || !backAsset) {
+            throw new Error(`Missing binary assets for paired card '${rec.originalFileName}' during restore.`);
+          }
+
+          const frontBlob = base64ToBlob(frontAsset.base64Data, frontAsset.mimeType);
+          const backBlob = base64ToBlob(backAsset.base64Data, backAsset.mimeType);
+
+          await this.savePairedArchiveRecord(rec, frontBlob, backBlob, null, null);
+          insertedArchiveIds.push(rec.archiveId);
+          importedCount++;
+        } else {
+          // Single-sided physical card or template restoration
+          const assetKey = rec.frontAsset?.binaryStorageKey || (rec.backAsset ? (rec.backAsset.binaryStorageKey || rec.backAsset.assetId) : rec.archiveId);
+          const asset = bundle.assets.find(a => 
+            a.archiveId === assetKey || 
+            a.archiveId === rec.archiveId ||
+            (rec.frontAsset && a.assetId === rec.frontAsset.assetId) ||
+            (rec.backAsset && a.assetId === rec.backAsset.assetId)
+          );
+
+          if (!asset) {
+            throw new Error(`Missing binary asset for '${rec.originalFileName}' during restore.`);
+          }
+
+          const blob = base64ToBlob(asset.base64Data, asset.mimeType);
+          await this.saveArchiveRecord(rec, blob, null);
+          insertedArchiveIds.push(rec.archiveId);
+          importedCount++;
+        }
       }
 
-      // Check if archiveId is already registered
-      const existing = await this.getArchiveRecord(rec.archiveId);
-      if (existing) {
-        skippedDuplicates++;
-        continue;
+      for (const playCard of bundle.playableCards) {
+        const existing = await this.getPlayableCard(playCard.playableCardId);
+        if (!existing) {
+          await this.savePlayableCard(playCard);
+          insertedPlayableIds.push(playCard.playableCardId);
+        }
       }
 
-      const asset = bundle.assets.find(a => a.archiveId === rec.archiveId);
-      if (asset) {
-        const blob = base64ToBlob(asset.base64Data, asset.mimeType);
-        await this.saveArchiveRecord(rec, blob, null);
-        importedCount++;
+      return { importedCount, skippedDuplicates, validation };
+    } catch (err: any) {
+      // Transactional rollback: purge all partially imported records and playables
+      for (const pId of insertedPlayableIds) {
+        try {
+          await this.deletePlayableCard(pId);
+        } catch {
+          // ignore cleanup errors
+        }
       }
+      for (const arcId of insertedArchiveIds) {
+        try {
+          await this.deleteArchiveRecord(arcId);
+        } catch {
+          // ignore cleanup errors
+        }
+      }
+      throw new Error(`Restoration failed and was rolled back cleanly: ${err?.message || err}`);
     }
-
-    for (const playCard of bundle.playableCards) {
-      const existing = await this.getPlayableCard(playCard.playableCardId);
-      if (!existing) {
-        await this.savePlayableCard(playCard);
-      }
-    }
-
-    return { importedCount, skippedDuplicates, validation };
   }
 
   public async getStorageUsage(): Promise<{ totalBytes: number; recordCount: number; binaryCount: number }> {

@@ -44,8 +44,20 @@ export const LinkScansModal: React.FC<LinkScansModalProps> = ({
   const [primaryThumb, setPrimaryThumb] = useState<string | null>(null);
   const [secondaryThumb, setSecondaryThumb] = useState<string | null>(null);
 
-  // Eligible single-sided records (cards without a back asset)
-  const eligibleRecords = records.filter(r => !r.backAsset);
+  // Eligible single-sided records for FRONT scan: CARD_ARTWORK only, not paired, no backAsset, not UNKNOWN
+  const eligibleFrontRecords = records.filter(
+    r => r.classification === 'CARD_ARTWORK' && 
+         !(r.frontAsset && r.backAsset) && 
+         !r.backAsset && 
+         r.frontAsset?.side !== 'UNKNOWN'
+  );
+
+  // Eligible records for BACK scan: CARD_ARTWORK only, not paired, side not UNKNOWN
+  const eligibleBackRecords = records.filter(
+    r => r.classification === 'CARD_ARTWORK' && 
+         !(r.frontAsset && r.backAsset) && 
+         (r.backAsset ? r.backAsset.side !== 'UNKNOWN' : r.frontAsset?.side !== 'UNKNOWN')
+  );
 
   // Load preview thumbnails when selection changes
   useEffect(() => {
@@ -67,7 +79,9 @@ export const LinkScansModal: React.FC<LinkScansModalProps> = ({
       }
 
       if (secondaryId) {
-        const blob = await archiveStorage.getArchiveThumbnailForSide(secondaryId, 'FRONT') ||
+        const blob = await archiveStorage.getArchiveThumbnailForSide(secondaryId, 'BACK') ||
+                     await archiveStorage.getArchiveThumbnailForSide(secondaryId, 'FRONT') ||
+                     await archiveStorage.getArchiveBinaryForSide(secondaryId, 'BACK') ||
                      await archiveStorage.getArchiveBinaryForSide(secondaryId, 'FRONT');
         if (blob && blob.type.startsWith('image/')) {
           sUrl = URL.createObjectURL(blob);
@@ -168,7 +182,7 @@ export const LinkScansModal: React.FC<LinkScansModalProps> = ({
                 className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-hidden focus:border-amber-400"
               >
                 <option value="">-- Choose Front Scan --</option>
-                {eligibleRecords
+                {eligibleFrontRecords
                   .filter(r => r.archiveId !== secondaryId)
                   .map(r => (
                     <option key={r.archiveId} value={r.archiveId}>
@@ -206,7 +220,7 @@ export const LinkScansModal: React.FC<LinkScansModalProps> = ({
                 className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-hidden focus:border-purple-400"
               >
                 <option value="">-- Choose Back Scan --</option>
-                {eligibleRecords
+                {eligibleBackRecords
                   .filter(r => r.archiveId !== primaryId)
                   .map(r => (
                     <option key={r.archiveId} value={r.archiveId}>

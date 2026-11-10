@@ -423,7 +423,7 @@ export const CardArchiveScreen: React.FC = () => {
         </div>
 
         {/* Persistent Storage Health Banner */}
-        {!storageStatus.isPersistent && (
+        {!storageStatus.isPersistent && storageStatus.migrationStatus !== 'FAILED' && (
           <div className="bg-rose-950/80 border border-rose-500/40 rounded-2xl p-4 flex items-center gap-3 text-rose-200 text-xs shadow-lg">
             <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
             <div>
@@ -432,6 +432,37 @@ export const CardArchiveScreen: React.FC = () => {
                 {storageStatus.error || 'IndexedDB is blocked or disabled in this browser session (e.g. private window or permissions).'} Card scans cannot be saved permanently until browser storage permissions are permitted.
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Card Archive Migration Failure Banner */}
+        {storageStatus.migrationStatus === 'FAILED' && (
+          <div className="bg-amber-950/80 border border-amber-500/50 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-200 text-xs shadow-lg">
+            <div className="flex items-center gap-3">
+              <AlertCircle className="w-5 h-5 text-amber-400 shrink-0" />
+              <div>
+                <div className="font-bold">Card Archive Migration Interrupted</div>
+                <div className="text-[11px] text-amber-300/80 mt-0.5">
+                  {storageStatus.migrationError || storageStatus.error || 'A background schema migration was interrupted.'} Storage operations are safely paused to protect archive integrity.
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={async () => {
+                try {
+                  showToast('Retrying archive migration...');
+                  await archiveStorage.retryMigration();
+                  await refreshArchive();
+                  showToast('Archive migration completed successfully!');
+                } catch (err: any) {
+                  alert(`Migration retry failed: ${err?.message || err}`);
+                }
+              }}
+              className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition-colors shrink-0"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Retry Migration</span>
+            </button>
           </div>
         )}
 

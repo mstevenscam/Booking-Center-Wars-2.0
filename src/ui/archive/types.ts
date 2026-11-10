@@ -83,6 +83,8 @@ export interface StorageStatus {
   isPersistent: boolean;
   storageEngine: 'INDEXED_DB' | 'UNAVAILABLE';
   error: string | null;
+  migrationStatus?: 'IDLE' | 'COMPLETED' | 'FAILED';
+  migrationError?: string | null;
   isDevMemoryMode?: boolean;
 }
 
@@ -149,17 +151,23 @@ export interface ArchiveFilterOptions {
   sortBy: 'NAME' | 'YEAR_DESC' | 'YEAR_ASC' | 'IMPORT_DATE_DESC' | 'SIZE_DESC';
 }
 
+export interface ArchiveExportAsset {
+  archiveId: string;                   // Storage key (archiveId for front, binaryStorageKey / assetId for back)
+  assetId?: string;                    // Explicit asset UUID if defined
+  side?: CardAssetSide;                // 'FRONT' | 'BACK' | 'UNKNOWN'
+  originalFileName: string;
+  mimeType: string;
+  fileSize?: number;
+  checksum?: string;
+  base64Data: string;
+}
+
 export interface ArchiveExportBundle {
   version: number;
   exportedAt: string;
   records: HistoricalCardArchive[];
   playableCards: PlayableCardDefinition[];
-  assets: {
-    archiveId: string;
-    originalFileName: string;
-    mimeType: string;
-    base64Data: string;
-  }[];
+  assets: ArchiveExportAsset[];
 }
 
 export interface DriveFolderInfo {
