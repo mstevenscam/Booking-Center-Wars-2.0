@@ -38,6 +38,8 @@ import {
   generateStableArchiveId 
 } from '../utils';
 import { HistoricalCardArchive, PlayableCardDefinition, ArchiveExportBundle } from '../types';
+import { analyzeCardFilename, pairCardBatch } from '../cardPairing';
+import { normalizeArchiveRecord, resolveAssetBinaryKey, generateAssetId, getCardArchiveSideStatus } from '../cardAccessors';
 
 describe('Milestone 4B — Archive Reliability, Import Corrections & Verification', () => {
   let storage: ArchiveStorage;
@@ -958,5 +960,634 @@ describe('Milestone 4B — Archive Reliability, Import Corrections & Verificatio
     assert.equal(retrieved.archiveId, archiveId);
     assert.equal(retrieved.sourceDriveFileId, 'drive-commit-01');
   });
+
+  // =========================================================================
+  // MILESTONE 5: PHASE A — PAIRING ENGINE & DETERMINISTIC MATCHING TESTS
+  // =========================================================================
+
+  // TEST 26: PAIGE Example deterministic recognition and pairing
+  test('26. PAIGE Example: recognizes hockeycard_PAIGE.png and hockeycard_paige_back.png as a confirmed pair', () => {
+    const front = analyzeCardFilename('hockeycard_PAIGE.png');
+    const back = analyzeCardFilename('hockeycard_paige_back.png');
+
+    assert.equal(front.side, 'FRONT');
+    assert.equal(front.normalizedBaseName, 'hockeycard_paige');
+
+    assert.equal(back.side, 'BACK');
+    assert.equal(back.normalizedBaseName, 'hockeycard_paige');
+
+    // Batch pairing
+    const batch = [
+      { name: 'hockeycard_PAIGE.png', classification: 'CARD_ARTWORK' as const },
+      { name: 'hockeycard_paige_back.png', classification: 'CARD_ARTWORK' as const },
+    ];
+    const pairs = pairCardBatch(batch);
+    assert.equal(pairs.length, 1);
+    assert.equal(pairs[0].status, 'CONFIRMED');
+    assert.equal(pairs[0].front?.name, 'hockeycard_PAIGE.png');
+    assert.equal(pairs[0].back?.name, 'hockeycard_paige_back.png');
+  });
+
+  // TEST 27: Case-insensitive matching and whitespace tolerance
+  test('27. Case-insensitive matching and whitespace tolerance', () => {
+    const front = analyzeCardFilename('  Dave_Rig_Tech.JPG  ');
+    const back = analyzeCardFilename('dave_rig_tech_BACK.webp');
+
+    assert.equal(front.side, 'FRONT');
+    assert.equal(back.side, 'BACK');
+    assert.equal(front.normalizedBaseName, back.normalizedBaseName);
+
+    const pairs = pairCardBatch([
+      { name: '  Dave_Rig_Tech.JPG  ', classification: 'CARD_ARTWORK' as const },
+      { name: 'dave_rig_tech_BACK.webp', classification: 'CARD_ARTWORK' as const },
+    ]);
+    assert.equal(pairs.length, 1);
+    assert.equal(pairs[0].status, 'CONFIRMED');
+  });
+
+  // TEST 28: Support for different image extensions between front and back
+  test('28. Pairs front and back with different extensions (.png and .tif)', () => {
+    const pairs = pairCardBatch([
+      { name: 'card_001.png', classification: 'CARD_ARTWORK' as const },
+      { name: 'card_001_back.tif', classification: 'CARD_ARTWORK' as const },
+    ]);
+    assert.equal(pairs.length, 1);
+    assert.equal(pairs[0].status, 'CONFIRMED');
+    assert.equal(pairs[0].front?.name, 'card_001.png');
+    assert.equal(pairs[0].back?.name, 'card_001_back.tif');
+  });
+
+  // TEST 29: Front-only and Back-only isolated files
+  test('29. Correctly classifies unpaired front-only and back-only files', () => {
+    const pairs = pairCardBatch([
+      { name: 'solo_front.png', classification: 'CARD_ARTWORK' as const },
+      { name: 'lonely_card_back.jpg', classification: 'CARD_ARTWORK' as const },
+    ]);
+    assert.equal(pairs.length, 2);
+
+    const soloFront = pairs.find(p => p.cardBaseId === 'solo');
+    assert.ok(soloFront);
+    assert.equal(soloFront.status, 'FRONT_ONLY');
+    assert.equal(soloFront.front?.name, 'solo_front.png');
+    assert.equal(soloFront.back, null);
+
+    const lonelyBack = pairs.find(p => p.cardBaseId === 'lonely_card');
+    assert.ok(lonelyBack);
+    assert.equal(lonelyBack.status, 'BACK_ONLY');
+    assert.equal(lonelyBack.front, null);
+    assert.equal(lonelyBack.back?.name, 'lonely_card_back.jpg');
+  });
+
+  // TEST 30: Ambiguous matches: multiple backs or conflicting candidates flagged as AMBIGUOUS
+  test('30. Flags multiple backs sharing one base identifier as AMBIGUOUS without auto-pairing', () => {
+    const pairs = pairCardBatch([
+      { name: 'paige.png', classification: 'CARD_ARTWORK' as const },
+      { name: 'paige_back.png', classification: 'CARD_ARTWORK' as const },
+      { name: 'paige_back.jpg', classification: 'CARD_ARTWORK' as const }, // Conflicting back!
+    ]);
+    assert.equal(pairs.length, 1);
+    assert.equal(pairs[0].status, 'AMBIGUOUS');
+    assert.match(pairs[0].reason || '', /ambiguous/i);
+  });
+
+  // TEST 31: Excludes Photoshop templates and non-artwork from automatic pairing
+  test('31. Never automatically pairs Photoshop templates or other assets', () => {
+    const pairs = pairCardBatch([
+      { name: 'Template_Master.psd', classification: 'PHOTOSHOP_TEMPLATE' as const },
+      { name: 'Template_Master_back.psd', classification: 'PHOTOSHOP_TEMPLATE' as const },
+    ]);
+    // Each template remains an independent singleton
+    assert.equal(pairs.length, 2);
+    assert.notEqual(pairs[0].status, 'CONFIRMED');
+    assert.notEqual(pairs[1].status, 'CONFIRMED');
+  });
+
+  // TEST 32: Canonical accessors normalize legacy shadow fields accurately
+  test('32. Canonical accessors keep legacy shadow fields in sync with front/back provenance', () => {
+    const twoSidedRecord: HistoricalCardArchive = {
+      archiveId: 'arc-2021-paige',
+      frontAsset: {
+        assetId: 'asset-front-uuid-1',
+        side: 'FRONT',
+        binaryStorageKey: 'arc-2021-paige',
+        fileName: 'hockeycard_PAIGE.png',
+        fileType: 'image/png',
+        fileSize: 1024,
+        fileChecksum: 'sha256-front-hex',
+        sourceProvider: 'GOOGLE_DRIVE',
+        sourceFolderPath: '2021 Scans',
+        sourceDriveFileId: 'drive-front-id',
+        importedAt: '2026-11-10T00:00:00.000Z',
+      },
+      backAsset: {
+        assetId: 'asset-back-uuid-2',
+        side: 'BACK',
+        binaryStorageKey: 'asset-back-uuid-2',
+        fileName: 'hockeycard_paige_back.png',
+        fileType: 'image/png',
+        fileSize: 800,
+        fileChecksum: 'sha256-back-hex',
+        sourceProvider: 'GOOGLE_DRIVE',
+        sourceFolderPath: '2021 Scans',
+        sourceDriveFileId: 'drive-back-id',
+        importedAt: '2026-11-10T00:00:00.000Z',
+      },
+      originalCreationYear: 2021,
+      classification: 'CARD_ARTWORK',
+      userNotes: null,
+      // Outdated shadow fields to be normalized
+      originalFileName: 'old_name.png',
+      originalFileType: 'image/jpeg',
+      originalFileSize: 0,
+      originalFileChecksum: 'old-hash',
+      sourceProvider: 'LOCAL_UPLOAD',
+      sourceFolderPath: null,
+      sourceDriveFileId: null,
+      importedAt: '2020-01-01T00:00:00.000Z',
+    };
+
+    const normalized = normalizeArchiveRecord(twoSidedRecord);
+    assert.equal(normalized.schemaVersion, 2);
+    assert.equal(normalized.originalFileName, 'hockeycard_PAIGE.png');
+    assert.equal(normalized.originalFileChecksum, 'sha256-front-hex');
+    assert.equal(normalized.sourceDriveFileId, 'drive-front-id');
+
+    // Key resolver verification
+    assert.equal(resolveAssetBinaryKey(normalized, 'FRONT'), 'arc-2021-paige');
+    assert.equal(resolveAssetBinaryKey(normalized, 'BACK'), 'asset-back-uuid-2');
+  });
+
+  // =========================================================================
+  // MILESTONE 5: PHASE B — STORAGE, MIGRATION & ATOMIC LINKING TESTS
+  // =========================================================================
+
+  // TEST 33: Idempotent migration identifies front, back, and unknown sides accurately
+  test('33. Idempotent migration populates frontAsset, backAsset, and UNKNOWN without merging', async () => {
+    // 1. Seed 3 legacy records without frontAsset / backAsset
+    const legacyFront: HistoricalCardArchive = {
+      archiveId: 'arc-legacy-front',
+      originalFileName: 'hockeycard_PAIGE.png',
+      originalFileType: 'image/png',
+      originalFileSize: 100,
+      originalFileChecksum: 'checksum-front',
+      originalCreationYear: 2021,
+      sourceProvider: 'LOCAL_UPLOAD',
+      sourceFolderPath: null,
+      sourceDriveFileId: null,
+      importedAt: new Date().toISOString(),
+      classification: 'CARD_ARTWORK',
+      userNotes: 'Front note',
+    };
+
+    const legacyBack: HistoricalCardArchive = {
+      archiveId: 'arc-legacy-back',
+      originalFileName: 'hockeycard_paige_back.png',
+      originalFileType: 'image/png',
+      originalFileSize: 100,
+      originalFileChecksum: 'checksum-back',
+      originalCreationYear: 2021,
+      sourceProvider: 'LOCAL_UPLOAD',
+      sourceFolderPath: null,
+      sourceDriveFileId: null,
+      importedAt: new Date().toISOString(),
+      classification: 'CARD_ARTWORK',
+      userNotes: 'Back note',
+    };
+
+    const legacyUnknown: HistoricalCardArchive = {
+      archiveId: 'arc-legacy-unknown',
+      originalFileName: '???_symbol_card.png',
+      originalFileType: 'image/png',
+      originalFileSize: 50,
+      originalFileChecksum: 'checksum-unknown',
+      originalCreationYear: 2020,
+      sourceProvider: 'LOCAL_UPLOAD',
+      sourceFolderPath: null,
+      sourceDriveFileId: null,
+      importedAt: new Date().toISOString(),
+      classification: 'CARD_ARTWORK',
+      userNotes: 'Mysterious scan',
+    };
+
+    const b = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' });
+    await storage.saveArchiveRecord(legacyFront, b, null);
+    await storage.saveArchiveRecord(legacyBack, b, null);
+    await storage.saveArchiveRecord(legacyUnknown, b, null);
+
+    // 2. Trigger migration
+    await storage.migratePhysicalCardAssets();
+
+    // 3. Verify each record
+    const frontAfter = await storage.getArchiveRecord('arc-legacy-front');
+    assert.ok(frontAfter);
+    assert.equal(frontAfter.schemaVersion, 2);
+    assert.ok(frontAfter.frontAsset);
+    assert.equal(frontAfter.frontAsset.side, 'FRONT');
+    assert.equal(frontAfter.backAsset, null);
+
+    const backAfter = await storage.getArchiveRecord('arc-legacy-back');
+    assert.ok(backAfter);
+    assert.equal(backAfter.schemaVersion, 2);
+    assert.equal(backAfter.frontAsset, null);
+    assert.ok(backAfter.backAsset);
+    assert.equal(backAfter.backAsset.side, 'BACK');
+    // Confirm legacy shadow fields continue reading from backAsset
+    assert.equal(backAfter.originalFileName, 'hockeycard_paige_back.png');
+
+    const unknownAfter = await storage.getArchiveRecord('arc-legacy-unknown');
+    assert.ok(unknownAfter);
+    assert.equal(unknownAfter.schemaVersion, 2);
+    assert.ok(unknownAfter.frontAsset);
+    assert.equal(unknownAfter.frontAsset.side, 'UNKNOWN');
+
+    // Verify all 3 records still exist as independent unmerged entries
+    const all = await storage.getAllArchiveRecords();
+    assert.equal(all.length, 3);
+  });
+
+  // TEST 34: Migration metadata isolation from queries, counts, and backups
+  test('34. Migration metadata marker __archive_meta_migration_v2__ is strictly excluded from user queries and usage', async () => {
+    await storage.migratePhysicalCardAssets();
+
+    const allRecords = await storage.getAllArchiveRecords();
+    const marker = allRecords.find(r => r.archiveId.startsWith('__'));
+    assert.equal(marker, undefined, 'Metadata marker must never appear in user archive queries');
+
+    const usage = await storage.getStorageUsage();
+    assert.equal(usage.recordCount, allRecords.length);
+  });
+
+  // TEST 35: Atomic linking with multiple playable variations on both records
+  test('35. Atomic linking links two records, re-keys secondary binary, and repoints all playable definitions', async () => {
+    const rawFront = new Uint8Array([10, 20, 30]);
+    const rawBack = new Uint8Array([40, 50, 60]);
+    const blobFront = new Blob([rawFront], { type: 'image/png' });
+    const blobBack = new Blob([rawBack], { type: 'image/png' });
+
+    const cFront = await calculateFileChecksum(blobFront);
+    const cBack = await calculateFileChecksum(blobBack);
+
+    const cardFront: HistoricalCardArchive = {
+      archiveId: 'arc-link-front',
+      originalFileName: 'hockeycard_PAIGE.png',
+      originalFileSize: 3,
+      originalFileType: 'image/png',
+      originalFileChecksum: cFront,
+      originalCreationYear: 2021,
+      sourceProvider: 'LOCAL_UPLOAD',
+      sourceFolderPath: '2021 Scans',
+      sourceDriveFileId: null,
+      importedAt: new Date().toISOString(),
+      classification: 'CARD_ARTWORK',
+      userNotes: 'Front scan',
+    };
+
+    const cardBack: HistoricalCardArchive = {
+      archiveId: 'arc-link-back',
+      originalFileName: 'hockeycard_paige_back.png',
+      originalFileSize: 3,
+      originalFileType: 'image/png',
+      originalFileChecksum: cBack,
+      originalCreationYear: 2021,
+      sourceProvider: 'LOCAL_UPLOAD',
+      sourceFolderPath: '2021 Scans',
+      sourceDriveFileId: null,
+      importedAt: new Date().toISOString(),
+      classification: 'CARD_ARTWORK',
+      userNotes: 'Back scan',
+    };
+
+    await storage.saveArchiveRecord(cardFront, blobFront, null);
+    await storage.saveArchiveRecord(cardBack, blobBack, null);
+
+    // Create 2 playable cards on front, 2 playable cards on back
+    const playF1: PlayableCardDefinition = {
+      playableCardId: 'play-paige-std',
+      archiveId: 'arc-link-front',
+      displayName: 'Paige - Standard',
+      variationName: 'Standard',
+      cardType: 'CHARACTER',
+      rarity: 'COMMON',
+      department: 'TECH',
+      shiftCost: 3,
+      efficiency: 4,
+      stamina: 5,
+      maxStamina: 5,
+      influence: 1,
+      keywords: [],
+      abilityName: null,
+      abilityDesc: null,
+      flavor: 'Ready for shift',
+      isActive: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const playF2: PlayableCardDefinition = {
+      ...playF1,
+      playableCardId: 'play-paige-foil',
+      displayName: 'Paige - Foil',
+      variationName: 'Foil',
+      rarity: 'RARE',
+    };
+
+    const playB1: PlayableCardDefinition = {
+      ...playF1,
+      playableCardId: 'play-paige-back-lore',
+      archiveId: 'arc-link-back',
+      displayName: 'Paige - Lore Variation',
+      variationName: 'Lore',
+    };
+
+    const playB2: PlayableCardDefinition = {
+      ...playF1,
+      playableCardId: 'play-paige-back-promo',
+      archiveId: 'arc-link-back',
+      displayName: 'Paige - Promo Variation',
+      variationName: 'Promo',
+    };
+
+    await storage.savePlayableCard(playF1);
+    await storage.savePlayableCard(playF2);
+    await storage.savePlayableCard(playB1);
+    await storage.savePlayableCard(playB2);
+
+    // Execute atomic link
+    const linked = await storage.linkExistingArchiveRecords('arc-link-front', 'arc-link-back', 'FRONT', 'BACK');
+
+    // 1. Verify combined physical card
+    assert.ok(linked.frontAsset);
+    assert.ok(linked.backAsset);
+    assert.equal(linked.frontAsset.fileName, 'hockeycard_PAIGE.png');
+    assert.equal(linked.backAsset.fileName, 'hockeycard_paige_back.png');
+    assert.equal(linked.backAsset.fileChecksum, cBack);
+
+    // 2. Verify secondary record was safely retired
+    const secRecord = await storage.getArchiveRecord('arc-link-back');
+    assert.equal(secRecord, null);
+
+    // 3. Verify all 4 playable cards are active and point to primary physical card
+    const playableOnPrimary = await storage.getPlayableCardsForArchive('arc-link-front');
+    assert.equal(playableOnPrimary.length, 4);
+
+    // 4. Verify both binaries are retrievable
+    const frontBlobRetrieved = await storage.getArchiveBinaryForSide('arc-link-front', 'FRONT');
+    const backBlobRetrieved = await storage.getArchiveBinaryForSide('arc-link-front', 'BACK');
+    assert.ok(frontBlobRetrieved);
+    assert.ok(backBlobRetrieved);
+    assert.equal(frontBlobRetrieved.size, 3);
+    assert.equal(backBlobRetrieved.size, 3);
+
+    // 5. Test exact reversible unlinking restores secondary record and original playable cards
+    const { primary, secondary } = await storage.unlinkArchiveRecord('arc-link-front');
+
+    // Verify primary card has backAsset cleared
+    assert.equal(primary.backAsset, null);
+    assert.equal(primary.metadata?.unlinkingSnapshot, null);
+
+    // Verify secondary card is restored with exact original ID
+    assert.equal(secondary.archiveId, 'arc-link-back');
+    assert.equal(secondary.originalFileName, 'hockeycard_paige_back.png');
+
+    const restoredSec = await storage.getArchiveRecord('arc-link-back');
+    assert.ok(restoredSec);
+    assert.equal(restoredSec.originalFileName, 'hockeycard_paige_back.png');
+
+    // Verify secondary binary is restored under original archiveId
+    const restoredSecBinary = await storage.getArchiveBinary('arc-link-back');
+    assert.ok(restoredSecBinary);
+    assert.equal(restoredSecBinary.size, 3);
+
+    // Verify playable cards were restored to their exact original cards
+    const playablesOnPrimary = await storage.getPlayableCardsForArchive('arc-link-front');
+    assert.equal(playablesOnPrimary.length, 2);
+    assert.ok(playablesOnPrimary.some(p => p.playableCardId === 'play-paige-std'));
+    assert.ok(playablesOnPrimary.some(p => p.playableCardId === 'play-paige-foil'));
+
+    const playablesOnSecondary = await storage.getPlayableCardsForArchive('arc-link-back');
+    assert.equal(playablesOnSecondary.length, 2);
+    assert.ok(playablesOnSecondary.some(p => p.playableCardId === 'play-paige-back-lore'));
+    assert.ok(playablesOnSecondary.some(p => p.playableCardId === 'play-paige-back-promo'));
+  });
+
+  // TEST 37: Atomic linking rollback safety on validation failure
+  test('37. Rejects linking if primary already has a back asset or secondary does not exist without mutating records', async () => {
+    await assert.rejects(
+      async () => {
+        await storage.linkExistingArchiveRecords('non-existent-1', 'non-existent-2');
+      },
+      /not found/i
+    );
+  });
+
+  // TEST 38: Two-sided physical card save and retrieval via savePairedArchiveRecord
+  test('38. savePairedArchiveRecord stores both front and back binaries atomically with correct side status', async () => {
+    const frontBlob = new Blob(['FRONT-CONTENT-123'], { type: 'image/png' });
+    const backBlob = new Blob(['BACK-CONTENT-456'], { type: 'image/png' });
+    const frontChecksum = await calculateFileChecksum(frontBlob);
+    const backChecksum = await calculateFileChecksum(backBlob);
+    const archiveId = 'arc-two-sided-test';
+    const backAssetId = generateAssetId();
+
+    const record: HistoricalCardArchive = {
+      archiveId,
+      schemaVersion: 2,
+      originalCreationYear: 2022,
+      classification: 'CARD_ARTWORK',
+      userNotes: 'Two-sided card test',
+      frontAsset: {
+        assetId: generateAssetId(),
+        side: 'FRONT',
+        binaryStorageKey: archiveId,
+        fileName: 'hockeycard_GRIFF.png',
+        fileType: 'image/png',
+        fileSize: frontBlob.size,
+        fileChecksum: frontChecksum,
+        sourceProvider: 'LOCAL_UPLOAD',
+        sourceFolderPath: '2022/Players',
+        sourceDriveFileId: null,
+        importedAt: new Date().toISOString(),
+      },
+      backAsset: {
+        assetId: backAssetId,
+        side: 'BACK',
+        binaryStorageKey: backAssetId,
+        fileName: 'hockeycard_griff_back.png',
+        fileType: 'image/png',
+        fileSize: backBlob.size,
+        fileChecksum: backChecksum,
+        sourceProvider: 'LOCAL_UPLOAD',
+        sourceFolderPath: '2022/Players',
+        sourceDriveFileId: null,
+        importedAt: new Date().toISOString(),
+      },
+      originalFileName: 'hockeycard_GRIFF.png',
+      originalFileType: 'image/png',
+      originalFileSize: frontBlob.size,
+      originalFileChecksum: frontChecksum,
+      sourceProvider: 'LOCAL_UPLOAD',
+      sourceFolderPath: '2022/Players',
+      sourceDriveFileId: null,
+      importedAt: new Date().toISOString(),
+    };
+
+    await storage.savePairedArchiveRecord(record, frontBlob, backBlob);
+
+    // 1. Verify record side status
+    const retrieved = await storage.getArchiveRecord(archiveId);
+    assert.ok(retrieved);
+    assert.equal(getCardArchiveSideStatus(retrieved), 'PAIRED');
+    assert.equal(retrieved.frontAsset?.fileName, 'hockeycard_GRIFF.png');
+    assert.equal(retrieved.backAsset?.fileName, 'hockeycard_griff_back.png');
+
+    // 2. Verify both front and back binaries are retrieved with exact content
+    const retrievedFront = await storage.getArchiveBinaryForSide(archiveId, 'FRONT');
+    const retrievedBack = await storage.getArchiveBinaryForSide(archiveId, 'BACK');
+    assert.ok(retrievedFront);
+    assert.ok(retrievedBack);
+    assert.equal(await calculateFileChecksum(retrievedFront), frontChecksum);
+    assert.equal(await calculateFileChecksum(retrievedBack), backChecksum);
+
+    // 3. Verify legacy single-binary accessor retrieves front
+    const legacyFront = await storage.getArchiveBinary(archiveId);
+    assert.ok(legacyFront);
+    assert.equal(await calculateFileChecksum(legacyFront), frontChecksum);
+  });
+
+  // TEST 39: Deleting a paired physical card cleans up both binaries and thumbnails
+  test('39. Deleting a paired physical card cleans up both front and back binaries without leaving orphans', async () => {
+    const frontBlob = new Blob(['DEL-FRONT'], { type: 'image/png' });
+    const backBlob = new Blob(['DEL-BACK'], { type: 'image/png' });
+    const frontHash = await calculateFileChecksum(frontBlob);
+    const backHash = await calculateFileChecksum(backBlob);
+    const archiveId = 'arc-paired-delete-test';
+    const backAssetId = generateAssetId();
+
+    const record: HistoricalCardArchive = {
+      archiveId,
+      schemaVersion: 2,
+      originalCreationYear: 2021,
+      classification: 'CARD_ARTWORK',
+      userNotes: null,
+      frontAsset: {
+        assetId: generateAssetId(),
+        side: 'FRONT',
+        binaryStorageKey: archiveId,
+        fileName: 'test_card.png',
+        fileType: 'image/png',
+        fileSize: frontBlob.size,
+        fileChecksum: frontHash,
+        sourceProvider: 'LOCAL_UPLOAD',
+        sourceFolderPath: null,
+        sourceDriveFileId: null,
+        importedAt: new Date().toISOString(),
+      },
+      backAsset: {
+        assetId: backAssetId,
+        side: 'BACK',
+        binaryStorageKey: backAssetId,
+        fileName: 'test_card_back.png',
+        fileType: 'image/png',
+        fileSize: backBlob.size,
+        fileChecksum: backHash,
+        sourceProvider: 'LOCAL_UPLOAD',
+        sourceFolderPath: null,
+        sourceDriveFileId: null,
+        importedAt: new Date().toISOString(),
+      },
+      originalFileName: 'test_card.png',
+      originalFileType: 'image/png',
+      originalFileSize: frontBlob.size,
+      originalFileChecksum: frontHash,
+      sourceProvider: 'LOCAL_UPLOAD',
+      sourceFolderPath: null,
+      sourceDriveFileId: null,
+      importedAt: new Date().toISOString(),
+    };
+
+    await storage.savePairedArchiveRecord(record, frontBlob, backBlob);
+
+    // Verify both exist before delete
+    assert.ok(await storage.getArchiveBinaryForSide(archiveId, 'FRONT'));
+    assert.ok(await storage.getArchiveBinaryForSide(archiveId, 'BACK'));
+
+    // Execute deletion
+    await storage.deleteArchiveRecord(archiveId);
+
+    // Verify record and both binaries are gone
+    assert.equal(await storage.getArchiveRecord(archiveId), null);
+    assert.equal(await storage.getArchiveBinaryForSide(archiveId, 'FRONT'), null);
+    assert.equal(await storage.getArchiveBinaryForSide(archiveId, 'BACK'), null);
+  });
+
+  // TEST 40: Backup bundle export preserves both front and back assets
+  test('40. Backup bundle export preserves both front and back assets of paired physical cards', async () => {
+    const fBlob = new Blob(['BUNDLE-FRONT-AAA'], { type: 'image/png' });
+    const bBlob = new Blob(['BUNDLE-BACK-BBB'], { type: 'image/png' });
+    const fHash = await calculateFileChecksum(fBlob);
+    const bHash = await calculateFileChecksum(bBlob);
+    const archiveId = 'arc-bundle-paired';
+    const backAssetId = generateAssetId();
+
+    const record: HistoricalCardArchive = {
+      archiveId,
+      schemaVersion: 2,
+      originalCreationYear: 2023,
+      classification: 'CARD_ARTWORK',
+      userNotes: null,
+      frontAsset: {
+        assetId: generateAssetId(),
+        side: 'FRONT',
+        binaryStorageKey: archiveId,
+        fileName: 'card_sarah.png',
+        fileType: 'image/png',
+        fileSize: fBlob.size,
+        fileChecksum: fHash,
+        sourceProvider: 'LOCAL_UPLOAD',
+        sourceFolderPath: null,
+        sourceDriveFileId: null,
+        importedAt: new Date().toISOString(),
+      },
+      backAsset: {
+        assetId: backAssetId,
+        side: 'BACK',
+        binaryStorageKey: backAssetId,
+        fileName: 'card_sarah_back.png',
+        fileType: 'image/png',
+        fileSize: bBlob.size,
+        fileChecksum: bHash,
+        sourceProvider: 'LOCAL_UPLOAD',
+        sourceFolderPath: null,
+        sourceDriveFileId: null,
+        importedAt: new Date().toISOString(),
+      },
+      originalFileName: 'card_sarah.png',
+      originalFileType: 'image/png',
+      originalFileSize: fBlob.size,
+      originalFileChecksum: fHash,
+      sourceProvider: 'LOCAL_UPLOAD',
+      sourceFolderPath: null,
+      sourceDriveFileId: null,
+      importedAt: new Date().toISOString(),
+    };
+
+    await storage.savePairedArchiveRecord(record, fBlob, bBlob);
+
+    const bundle = await storage.exportArchiveBundle();
+    assert.ok(bundle.records.some(r => r.archiveId === archiveId));
+
+    // Verify both front asset and back asset binaries are included in assets array
+    const frontAssetInBundle = bundle.assets.find(a => a.archiveId === archiveId);
+    const backAssetInBundle = bundle.assets.find(a => a.archiveId === backAssetId);
+    assert.ok(frontAssetInBundle, 'Front binary asset must be included in bundle');
+    assert.ok(backAssetInBundle, 'Back binary asset must be included in bundle');
+    assert.equal(frontAssetInBundle.originalFileName, 'card_sarah.png');
+    assert.equal(backAssetInBundle.originalFileName, 'card_sarah_back.png');
+
+    const validation = await storage.validateArchiveBundle(bundle);
+    assert.equal(validation.isValid, true);
+  });
 });
+
+
 

@@ -1,13 +1,17 @@
 /**
  * BOOKING WARS: THE BATTLE FOR THE BOOKING CENTRE
- * Historical Archive Card Detail Modal
+ * Historical Archive Card Detail Modal (Milestone 5 — Physical Front/Back Inspection)
  * 
  * Features:
- * - Full-resolution view of original physical card scan or Photoshop template (.psd).
- * - Metadata inspector: SHA-256 checksum, file size, creation year, source provider.
- * - Download original unaltered asset directly.
+ * - Full-resolution view of original physical card scans (both Front and Back sides).
+ * - Side-by-side desktop viewport with high-contrast mobile toggle tabs [ Front Scan ] [ Back Scan ].
+ * - Independent download actions for unaltered original Front and Back binaries.
+ * - Missing side notification banner when a card has only front or back.
+ * - Side Unknown classifier for ambiguous records.
+ * - Atomic unlinking action: safely splits a 2-sided card back into two independent archive records.
+ * - Metadata inspector: SHA-256 checksums, file sizes, creation year, source provenance for each side.
  * - Linked playable digital card variations manager.
- * - Editable archival notes and year corrections.
+ * - Curator archival notes and year editor.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -25,12 +29,17 @@ import {
   Layers,
   Save,
   Check,
-  ExternalLink
+  ExternalLink,
+  Scissors,
+  CheckCircle2,
+  AlertTriangle,
+  HelpCircle,
+  ArrowLeftRight
 } from 'lucide-react';
-import { HistoricalCardArchive, PlayableCardDefinition } from './types';
+import { HistoricalCardArchive, PlayableCardDefinition, CardAssetSide } from './types';
 import { archiveStorage } from './storage';
 import { formatFileSize } from './utils';
-import { CardView } from '../components/CardView';
+import { getCardArchiveSideStatus } from './cardAccessors';
 
 interface ArchiveCardDetailModalProps {
   record: HistoricalCardArchive | null;
@@ -47,13 +56,16 @@ export const ArchiveCardDetailModal: React.FC<ArchiveCardDetailModalProps> = ({
   onRecordDeleted,
   onCreatePlayableVariation
 }) => {
-  const [binaryBlob, setBinaryBlob] = useState<Blob | null>(null);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [frontBlob, setFrontBlob] = useState<Blob | null>(null);
+  const [backBlob, setBackBlob] = useState<Blob | null>(null);
+  const [frontImageUrl, setFrontImageUrl] = useState<string | null>(null);
+  const [backImageUrl, setBackImageUrl] = useState<string | null>(null);
+  const [activeSide, setActiveSide] = useState<'FRONT' | 'BACK'>('FRONT');
   const [linkedPlayableCards, setLinkedPlayableCards] = useState<PlayableCardDefinition[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [notes, setNotes] = useState('');
   const [year, setYear] = useState<number | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [isUnlinking, setIsUnlinking] = useState(false);
 
   useEffect(() => {
     if (!record) return;
@@ -62,20 +74,34 @@ export const ArchiveCardDetailModal: React.FC<ArchiveCardDetailModalProps> = ({
     setYear(record.originalCreationYear);
     setIsEditing(false);
 
-    let activeUrl: string | null = null;
+    const hasFront = Boolean(record.frontAsset || (!record.frontAsset && !record.backAsset));
+    setActiveSide(hasFront ? 'FRONT' : 'BACK');
 
-    // Load binary blob and linked playable variations
+    let frontUrl: string | null = null;
+    let backUrl: string | null = null;
+
     const loadData = async () => {
-      const blob = await archiveStorage.getArchiveBinary(record.archiveId);
-      setBinaryBlob(blob);
-
-      if (blob && record.classification === 'CARD_ARTWORK') {
-        activeUrl = URL.createObjectURL(blob);
-        setImageUrl(activeUrl);
+      // 1. Load Front Binary
+      const fBlob = await archiveStorage.getArchiveBinaryForSide(record.archiveId, 'FRONT');
+      setFrontBlob(fBlob);
+      if (fBlob && record.classification === 'CARD_ARTWORK') {
+        frontUrl = URL.createObjectURL(fBlob);
+        setFrontImageUrl(frontUrl);
       } else {
-        setImageUrl(null);
+        setFrontImageUrl(null);
       }
 
+      // 2. Load Back Binary
+      const bBlob = await archiveStorage.getArchiveBinaryForSide(record.archiveId, 'BACK');
+      setBackBlob(bBlob);
+      if (bBlob && record.classification === 'CARD_ARTWORK') {
+        backUrl = URL.createObjectURL(bBlob);
+        setBackImageUrl(backUrl);
+      } else {
+        setBackImageUrl(null);
+      }
+
+      // 3. Load Linked Playable Cards
       const playable = await archiveStorage.getPlayableCardsForArchive(record.archiveId);
       setLinkedPlayableCards(playable);
     };
@@ -83,23 +109,39 @@ export const ArchiveCardDetailModal: React.FC<ArchiveCardDetailModalProps> = ({
     loadData();
 
     return () => {
-      if (activeUrl) {
-        URL.revokeObjectURL(activeUrl);
-      }
+      if (frontUrl) URL.revokeObjectURL(frontUrl);
+      if (backUrl) URL.revokeObjectURL(backUrl);
     };
   }, [record]);
 
   if (!record) return null;
 
   const isPsd = record.classification === 'PHOTOSHOP_TEMPLATE';
+  const sideStatus = getCardArchiveSideStatus(record);
+  const hasBothSides = Boolean(record.frontAsset && record.backAsset);
+  const hasFront = Boolean(record.frontAsset || (!record.frontAsset && !record.backAsset));
+  const hasBack = Boolean(record.backAsset);
 
-  // Download exact unaltered binary
-  const handleDownloadOriginal = () => {
-    if (!binaryBlob) return;
-    const url = URL.createObjectURL(binaryBlob);
+  // Download unaltered Front binary
+  const handleDownloadFront = () => {
+    if (!frontBlob) return;
+    const url = URL.createObjectURL(frontBlob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = record.originalFileName;
+    a.download = record.frontAsset?.fileName || record.originalFileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // Download unaltered Back binary
+  const handleDownloadBack = () => {
+    if (!backBlob) return;
+    const url = URL.createObjectURL(backBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = record.backAsset?.fileName || `${record.archiveId}_back.png`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -117,7 +159,26 @@ export const ArchiveCardDetailModal: React.FC<ArchiveCardDetailModalProps> = ({
     onRecordUpdated();
   };
 
-  // Delete playable card variation (NEVER deletes original archive record)
+  // Atomic unlinking of Front & Back sides
+  const handleUnlinkSides = async () => {
+    if (!confirm(
+      `Unlink "${record.originalFileName}"?\n\nThis will split this card back into its two original independent archive records. Any playable cards that originally belonged to the secondary scan will be cleanly restored.`
+    )) {
+      return;
+    }
+
+    setIsUnlinking(true);
+    try {
+      await archiveStorage.unlinkArchiveRecord(record.archiveId);
+      onRecordUpdated();
+      onClose();
+    } catch (err: any) {
+      alert(`Failed to unlink card: ${err.message}`);
+      setIsUnlinking(false);
+    }
+  };
+
+  // Delete playable card variation
   const handleDeletePlayableVariation = async (playableCardId: string) => {
     if (confirm('Delete this playable card variation? The original physical card scan in the archive will be completely preserved.')) {
       await archiveStorage.deletePlayableCard(playableCardId);
@@ -140,47 +201,142 @@ export const ArchiveCardDetailModal: React.FC<ArchiveCardDetailModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="relative z-10 w-full max-w-4xl bg-slate-900 border-2 border-slate-700/80 rounded-[2rem] shadow-2xl overflow-hidden flex flex-col md:flex-row max-h-[92vh]">
-        {/* Left: Original Asset Viewport */}
-        <div className="bg-slate-950 p-6 flex flex-col items-center justify-center border-b md:border-b-0 md:border-r border-slate-800 md:w-1/2 shrink-0">
-          <div className="relative w-full max-w-xs h-[380px] sm:h-[440px] rounded-2xl border-2 border-slate-800 overflow-hidden flex items-center justify-center bg-slate-900 shadow-xl group">
-            {imageUrl ? (
-              <img
-                src={imageUrl}
-                alt={record.originalFileName}
-                className="w-full h-full object-contain p-2"
-              />
-            ) : isPsd ? (
-              <div className="flex flex-col items-center justify-center text-center p-6 space-y-3">
-                <div className="p-4 rounded-2xl bg-sky-500/10 text-sky-400 border border-sky-500/20 shadow-lg">
-                  <FileCode className="w-12 h-12" />
-                </div>
-                <div>
-                  <div className="text-sm font-black text-slate-100">Original Photoshop Template</div>
-                  <div className="text-xs text-slate-400 font-mono mt-1">{record.originalFileName}</div>
-                </div>
-                <p className="text-[11px] text-slate-400 leading-relaxed max-w-xs">
-                  Master layered PSD asset. Stored in pure unaltered binary format for archival preservation.
-                </p>
-              </div>
-            ) : (
-              <div className="text-xs text-slate-500 italic">No visual preview available</div>
+      <div className="relative z-10 w-full max-w-5xl bg-slate-900 border-2 border-slate-700/80 rounded-[2rem] shadow-2xl overflow-hidden flex flex-col md:flex-row max-h-[92vh]">
+        {/* Left: Original Asset Viewport (Side-by-side or toggled) */}
+        <div className="bg-slate-950 p-5 sm:p-6 flex flex-col items-center justify-between border-b md:border-b-0 md:border-r border-slate-800 md:w-1/2 shrink-0 overflow-y-auto">
+          {/* Side Selector Tabs (Mobile & Quick-Toggle) */}
+          <div className="w-full flex items-center justify-between mb-3">
+            <div className="flex items-center gap-1.5 p-1 rounded-xl bg-slate-900 border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setActiveSide('FRONT')}
+                disabled={!hasFront}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  activeSide === 'FRONT'
+                    ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200 disabled:opacity-40'
+                }`}
+              >
+                <span>Front Scan</span>
+                {hasFront && <span className="w-1.5 h-1.5 rounded-full bg-sky-400" />}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveSide('BACK')}
+                disabled={!hasBack}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  activeSide === 'BACK'
+                    ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200 disabled:opacity-40'
+                }`}
+              >
+                <span>Back Scan</span>
+                {hasBack && <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />}
+              </button>
+            </div>
+
+            {/* Desktop Side-by-Side indicator */}
+            {hasBothSides && (
+              <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-2 py-0.5 rounded-full flex items-center gap-1">
+                <CheckCircle2 className="w-3 h-3" /> Two-Sided Physical Card
+              </span>
             )}
           </div>
 
-          {/* Download Original Asset Button */}
-          <button
-            onClick={handleDownloadOriginal}
-            className="mt-4 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 flex items-center gap-2 transition-colors shadow-md"
-            title="Download unaltered binary file"
-          >
-            <Download className="w-4 h-4 text-amber-400" />
-            <span>Download Original File ({formatFileSize(record.originalFileSize)})</span>
-          </button>
+          {/* Card Viewport Container */}
+          <div className="w-full flex-1 flex items-center justify-center min-h-[320px] sm:min-h-[380px]">
+            {/* Viewport for Active Side */}
+            <div className="relative w-full max-w-xs h-[360px] sm:h-[400px] rounded-2xl border-2 border-slate-800 overflow-hidden flex items-center justify-center bg-slate-900 shadow-xl group">
+              {activeSide === 'FRONT' ? (
+                frontImageUrl ? (
+                  <img
+                    src={frontImageUrl}
+                    alt={record.frontAsset?.fileName || record.originalFileName}
+                    className="w-full h-full object-contain p-2"
+                  />
+                ) : isPsd ? (
+                  <div className="flex flex-col items-center justify-center text-center p-6 space-y-3">
+                    <div className="p-4 rounded-2xl bg-sky-500/10 text-sky-400 border border-sky-500/20 shadow-lg">
+                      <FileCode className="w-12 h-12" />
+                    </div>
+                    <div>
+                      <div className="text-sm font-black text-slate-100">Original Photoshop Template</div>
+                      <div className="text-xs text-slate-400 font-mono mt-1">{record.originalFileName}</div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-xs text-slate-500 italic">No visual preview for front scan</div>
+                )
+              ) : (
+                backImageUrl ? (
+                  <img
+                    src={backImageUrl}
+                    alt={record.backAsset?.fileName || 'Back scan'}
+                    className="w-full h-full object-contain p-2"
+                  />
+                ) : (
+                  <div className="text-center p-6 text-slate-500 space-y-2">
+                    <AlertTriangle className="w-8 h-8 mx-auto text-amber-500/60" />
+                    <div className="text-xs font-bold text-slate-300">Back Scan Not Yet Imported</div>
+                    <p className="text-[11px] text-slate-500 leading-relaxed max-w-xs">
+                      This physical card only has a front scan recorded in the archive.
+                    </p>
+                  </div>
+                )
+              )}
+
+              {/* Corner Watermark Label */}
+              <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/75 backdrop-blur-sm text-[9px] font-mono text-slate-300 border border-white/10 uppercase">
+                {activeSide === 'FRONT' ? 'Front Side' : 'Back Side'}
+              </div>
+            </div>
+          </div>
+
+          {/* Missing Back Banner */}
+          {!hasBack && (
+            <div className="w-full mt-3 p-2.5 rounded-xl bg-amber-950/30 border border-amber-500/30 flex items-center gap-2 text-[11px] text-amber-300">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>Back scan not yet imported — use "Link Scans" to pair with a back scan.</span>
+            </div>
+          )}
+
+          {/* Missing Front Banner */}
+          {!hasFront && (
+            <div className="w-full mt-3 p-2.5 rounded-xl bg-amber-950/30 border border-amber-500/30 flex items-center gap-2 text-[11px] text-amber-300">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>Front scan not yet imported.</span>
+            </div>
+          )}
+
+          {/* Download Original Asset Buttons */}
+          <div className="w-full mt-4 flex flex-wrap items-center justify-center gap-2">
+            {frontBlob && (
+              <button
+                onClick={handleDownloadFront}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-sky-200 text-xs font-bold border border-slate-700 flex items-center gap-1.5 transition-colors shadow-md"
+                title="Download unaltered front binary file"
+              >
+                <Download className="w-3.5 h-3.5 text-sky-400" />
+                <span>Download Front ({formatFileSize(record.frontAsset?.fileSize || record.originalFileSize)})</span>
+              </button>
+            )}
+
+            {backBlob && (
+              <button
+                onClick={handleDownloadBack}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-purple-200 text-xs font-bold border border-slate-700 flex items-center gap-1.5 transition-colors shadow-md"
+                title="Download unaltered back binary file"
+              >
+                <Download className="w-3.5 h-3.5 text-purple-400" />
+                <span>Download Back ({formatFileSize(record.backAsset?.fileSize || 0)})</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Right: Archival Details & Linked Playable Cards */}
-        <div className="p-6 flex-1 flex flex-col justify-between overflow-y-auto">
+        <div className="p-5 sm:p-6 flex-1 flex flex-col justify-between overflow-y-auto">
           <div className="space-y-4">
             {/* Top Bar */}
             <div className="flex items-start justify-between">
@@ -189,9 +345,26 @@ export const ArchiveCardDetailModal: React.FC<ArchiveCardDetailModalProps> = ({
                   <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
                     {record.classification.replace('_', ' ')}
                   </span>
-                  <span className="text-xs font-mono text-slate-400">
-                    {record.sourceProvider === 'GOOGLE_DRIVE' ? 'Google Drive' : 'Local Computer'}
-                  </span>
+                  {sideStatus === 'PAIRED' && (
+                    <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      2 SIDES
+                    </span>
+                  )}
+                  {sideStatus === 'FRONT_ONLY' && (
+                    <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30">
+                      FRONT ONLY
+                    </span>
+                  )}
+                  {sideStatus === 'BACK_ONLY' && (
+                    <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                      BACK ONLY
+                    </span>
+                  )}
+                  {sideStatus === 'SIDE_UNKNOWN' && (
+                    <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      SIDE UNKNOWN
+                    </span>
+                  )}
                 </div>
                 <h2 className="text-xl sm:text-2xl font-black text-slate-100 mt-1 truncate" title={record.originalFileName}>
                   {record.originalFileName}
@@ -209,7 +382,7 @@ export const ArchiveCardDetailModal: React.FC<ArchiveCardDetailModalProps> = ({
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800">
                 <span className="text-[9px] uppercase font-bold text-slate-500 block">Archive ID</span>
-                <code className="text-[10.5px] font-mono text-slate-300 select-all">{record.archiveId}</code>
+                <code className="text-[10px] font-mono text-slate-300 select-all truncate block">{record.archiveId}</code>
               </div>
 
               <div className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800">
@@ -220,8 +393,8 @@ export const ArchiveCardDetailModal: React.FC<ArchiveCardDetailModalProps> = ({
                     value={year ?? ''}
                     onChange={(e) => setYear(parseInt(e.target.value, 10) || null)}
                     className="w-20 px-1 py-0.5 bg-slate-900 border border-slate-700 rounded text-xs font-mono text-slate-200 mt-0.5"
-                    min="2000"
-                    max="2030"
+                    min="1950"
+                    max="2050"
                   />
                 ) : (
                   <span className="font-mono text-amber-300 font-bold">{record.originalCreationYear || 'Unknown'}</span>
@@ -229,15 +402,21 @@ export const ArchiveCardDetailModal: React.FC<ArchiveCardDetailModalProps> = ({
               </div>
 
               <div className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800">
-                <span className="text-[9px] uppercase font-bold text-slate-500 block">File Size & Format</span>
-                <span className="font-mono text-slate-300">{formatFileSize(record.originalFileSize)} · {record.originalFileType}</span>
+                <span className="text-[9px] uppercase font-bold text-slate-500 block">Front Scan SHA-256</span>
+                <span className="font-mono text-[9.5px] text-slate-400 truncate block" title={record.frontAsset?.fileChecksum || record.originalFileChecksum}>
+                  {(record.frontAsset?.fileChecksum || record.originalFileChecksum).slice(0, 16)}...
+                </span>
               </div>
 
               <div className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800">
-                <span className="text-[9px] uppercase font-bold text-slate-500 block">SHA-256 Checksum</span>
-                <span className="font-mono text-[9.5px] text-slate-400 truncate block" title={record.originalFileChecksum}>
-                  {record.originalFileChecksum}
-                </span>
+                <span className="text-[9px] uppercase font-bold text-slate-500 block">Back Scan SHA-256</span>
+                {record.backAsset ? (
+                  <span className="font-mono text-[9.5px] text-purple-300 truncate block" title={record.backAsset.fileChecksum}>
+                    {record.backAsset.fileChecksum.slice(0, 16)}...
+                  </span>
+                ) : (
+                  <span className="text-slate-500 italic text-[10px]">None attached</span>
+                )}
               </div>
             </div>
 
@@ -266,7 +445,7 @@ export const ArchiveCardDetailModal: React.FC<ArchiveCardDetailModalProps> = ({
                 <textarea
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Enter historical context, who originally drew or designed the card..."
+                  placeholder="Enter historical context, artist notes, or physical card condition..."
                   className="w-full h-16 p-2 bg-slate-900 border border-slate-700 rounded text-xs text-slate-200 resize-none focus:outline-hidden"
                 />
               ) : (
@@ -275,6 +454,30 @@ export const ArchiveCardDetailModal: React.FC<ArchiveCardDetailModalProps> = ({
                 </p>
               )}
             </div>
+
+            {/* Unlink Sides Action (Available if card is paired) */}
+            {hasBothSides && (
+              <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 flex items-center justify-between text-xs">
+                <div>
+                  <div className="font-bold text-slate-200 flex items-center gap-1.5">
+                    <Scissors className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Split Front & Back Sides</span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">
+                    Separates this card back into two independent single-sided archive records.
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleUnlinkSides}
+                  disabled={isUnlinking}
+                  className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-amber-950 text-amber-300 border border-amber-500/40 text-[10px] font-bold transition-colors shrink-0 disabled:opacity-50"
+                >
+                  {isUnlinking ? 'Unlinking...' : 'Unlink Sides'}
+                </button>
+              </div>
+            )}
 
             {/* Linked Playable Digital Variations Section */}
             <div className="space-y-2">

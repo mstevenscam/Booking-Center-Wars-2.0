@@ -20,17 +20,39 @@ export type ArchiveSourceProvider =
   | 'GOOGLE_DRIVE' 
   | 'LOCAL_UPLOAD';
 
+export type CardAssetSide = 'FRONT' | 'BACK' | 'UNKNOWN';
+
+export interface ArchiveAssetProvenance {
+  assetId: string;                   // Collision-safe UUID: e.g. "asset-550e8400-e29b-41d4-a716-446655440000"
+  side: CardAssetSide;               // 'FRONT' | 'BACK' | 'UNKNOWN'
+  binaryStorageKey: string;          // Key in archive_binaries (archiveId for front, assetId for back)
+  fileName: string;                  // Exact original filename (e.g. "hockeycard_PAIGE.png")
+  fileType: string;                  // MIME type (e.g. "image/png")
+  fileSize: number;                  // Raw byte size
+  fileChecksum: string;              // Cryptographic SHA-256 hash (64 characters)
+  sourceProvider: ArchiveSourceProvider;
+  sourceFolderPath: string | null;   // e.g. "Humber Booking Centre Archive/2021 Scans"
+  sourceDriveFileId: string | null;  // Google Drive file ID if imported via Drive
+  importedAt: string;                // ISO timestamp
+}
+
+export interface ReversibleLinkSnapshot {
+  originalSecondaryArchiveId: string;
+  originalSecondaryRecord: HistoricalCardArchive;
+  linkedPlayableCardIds: string[];   // Exact IDs of playable cards originally pointing to secondary
+  linkedAt: string;
+}
+
 export interface HistoricalCardArchive {
   archiveId: string;                   // Stable unique ID, e.g. "arc-2022-sarah-cable-9f82a1"
-  originalFileName: string;            // Exact original filename
-  originalFileType: string;            // MIME type (e.g. "image/jpeg", "image/vnd.adobe.photoshop")
-  originalFileSize: number;            // Size in bytes
-  originalFileChecksum: string;        // Cryptographic SHA-256 hash of file content
+  schemaVersion?: number;              // Version marker: 2 for two-sided model
+
+  // Canonical asset references (The single source of truth for assets)
+  frontAsset?: ArchiveAssetProvenance | null;
+  backAsset?: ArchiveAssetProvenance | null;
+
+  // Archival card-level metadata
   originalCreationYear: number | null; // e.g. 2018, 2021, 2022, 2023
-  sourceProvider: ArchiveSourceProvider;
-  sourceFolderPath: string | null;     // e.g. "Humber Booking Centre Archive/2022 Scans"
-  sourceDriveFileId: string | null;    // Google Drive file ID if imported via Drive
-  importedAt: string;                  // ISO timestamp
   classification: ArchiveClassification;
   userNotes: string | null;
   derivedThumbnailId?: string | null;
@@ -41,7 +63,20 @@ export interface HistoricalCardArchive {
     aiSuggestedTitle?: string;
     aiSuggestedDepartment?: Department;
     aiExtractedFlavor?: string;
+    unlinkingSnapshot?: ReversibleLinkSnapshot | null;
   };
+
+  // -------------------------------------------------------------
+  // Legacy Read-Compatibility Shadow Fields (Derived via accessors)
+  // -------------------------------------------------------------
+  originalFileName: string;            // Exact original filename
+  originalFileType: string;            // MIME type (e.g. "image/jpeg", "image/vnd.adobe.photoshop")
+  originalFileSize: number;            // Size in bytes
+  originalFileChecksum: string;        // Cryptographic SHA-256 hash of file content
+  sourceProvider: ArchiveSourceProvider;
+  sourceFolderPath: string | null;     // e.g. "Humber Booking Centre Archive/2022 Scans"
+  sourceDriveFileId: string | null;    // Google Drive file ID if imported via Drive
+  importedAt: string;                  // ISO timestamp
 }
 
 export interface StorageStatus {
@@ -110,6 +145,7 @@ export interface ArchiveFilterOptions {
   classification: ArchiveClassification | 'ALL';
   sourceProvider: ArchiveSourceProvider | 'ALL';
   hasPlayableVariation: boolean | 'ALL';
+  side?: 'ALL' | 'PAIRED' | 'FRONT_ONLY' | 'BACK_ONLY' | 'SIDE_UNKNOWN';
   sortBy: 'NAME' | 'YEAR_DESC' | 'YEAR_ASC' | 'IMPORT_DATE_DESC' | 'SIZE_DESC';
 }
 

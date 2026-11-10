@@ -30,7 +30,8 @@ import {
   FolderUp,
   Database,
   ExternalLink,
-  BookOpen
+  BookOpen,
+  Link2
 } from 'lucide-react';
 import { 
   HistoricalCardArchive, 
@@ -42,10 +43,12 @@ import {
 } from '../archive/types';
 import { archiveStorage } from '../archive/storage';
 import { formatFileSize } from '../archive/utils';
+import { getCardArchiveSideStatus } from '../archive/cardAccessors';
 import { ImportModal } from '../archive/ImportModal';
 import { ArchiveCardDetailModal } from '../archive/ArchiveCardDetailModal';
 import { CreatePlayableCardModal } from '../archive/CreatePlayableCardModal';
 import { GoogleDriveSetupModal } from '../archive/GoogleDriveSetupModal';
+import { LinkScansModal } from '../archive/LinkScansModal';
 import { CardView } from '../components/CardView';
 import { GameViewCard } from '../types';
 
@@ -69,12 +72,14 @@ export const CardArchiveScreen: React.FC = () => {
     classification: 'ALL',
     sourceProvider: 'ALL',
     hasPlayableVariation: 'ALL',
+    side: 'ALL',
     sortBy: 'YEAR_DESC',
   });
 
   // Modals state
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [driveSetupOpen, setDriveSetupOpen] = useState(false);
+  const [linkScansModalOpen, setLinkScansModalOpen] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<HistoricalCardArchive | null>(null);
   const [createPlayableRecord, setCreatePlayableRecord] = useState<HistoricalCardArchive | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -301,6 +306,12 @@ export const CardArchiveScreen: React.FC = () => {
       if (!filters.hasPlayableVariation && hasVariation) return false;
     }
 
+    // Side filter
+    if (filters.side && filters.side !== 'ALL') {
+      const status = getCardArchiveSideStatus(rec);
+      if (status !== filters.side) return false;
+    }
+
     return true;
   }).sort((a, b) => {
     switch (filters.sortBy) {
@@ -366,6 +377,15 @@ export const CardArchiveScreen: React.FC = () => {
             >
               <Upload className="w-4 h-4" />
               <span>Import Cards</span>
+            </button>
+
+            <button
+              onClick={() => setLinkScansModalOpen(true)}
+              className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-850 text-amber-300 hover:text-amber-200 font-bold text-xs border border-amber-500/40 flex items-center gap-1.5 transition-colors shadow-sm"
+              title="Manually link two existing archive scans as Front and Back"
+            >
+              <Link2 className="w-4 h-4 text-amber-400" />
+              <span>Link Scans</span>
             </button>
 
             <button
@@ -536,6 +556,19 @@ export const CardArchiveScreen: React.FC = () => {
               <option value="GOOGLE_DRIVE">Google Drive</option>
             </select>
 
+            {/* Side */}
+            <select
+              value={filters.side ?? 'ALL'}
+              onChange={(e) => setFilters(f => ({ ...f, side: e.target.value as any }))}
+              className="px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-300 text-xs font-mono"
+            >
+              <option value="ALL">All Card Sides</option>
+              <option value="PAIRED">2-Sided Paired Cards</option>
+              <option value="FRONT_ONLY">Front Only</option>
+              <option value="BACK_ONLY">Back Only</option>
+              <option value="SIDE_UNKNOWN">Side Unknown</option>
+            </select>
+
             {/* Sort */}
             <select
               value={filters.sortBy}
@@ -608,6 +641,7 @@ export const CardArchiveScreen: React.FC = () => {
                   const thumbUrl = thumbnails.get(rec.archiveId);
                   const isPsd = rec.classification === 'PHOTOSHOP_TEMPLATE';
                   const variationsCount = playableCards.filter(p => p.archiveId === rec.archiveId).length;
+                  const sideStatus = getCardArchiveSideStatus(rec);
 
                   return (
                     <div
@@ -621,6 +655,26 @@ export const CardArchiveScreen: React.FC = () => {
                           <span className="px-1.5 py-0.2 rounded bg-slate-900/90 text-amber-300 border border-slate-800 font-mono">
                             {rec.originalCreationYear || 'UNDATED'}
                           </span>
+                          {sideStatus === 'PAIRED' && (
+                            <span className="px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-300 border border-emerald-500/40 text-[7px] uppercase font-black tracking-wider">
+                              2 SIDES
+                            </span>
+                          )}
+                          {sideStatus === 'FRONT_ONLY' && (
+                            <span className="px-1.5 py-0.2 rounded bg-sky-950 text-sky-300 border border-sky-500/40 text-[7px] uppercase font-black tracking-wider">
+                              FRONT
+                            </span>
+                          )}
+                          {sideStatus === 'BACK_ONLY' && (
+                            <span className="px-1.5 py-0.2 rounded bg-purple-950 text-purple-300 border border-purple-500/40 text-[7px] uppercase font-black tracking-wider">
+                              BACK
+                            </span>
+                          )}
+                          {sideStatus === 'SIDE_UNKNOWN' && (
+                            <span className="px-1.5 py-0.2 rounded bg-amber-950 text-amber-300 border border-amber-500/40 text-[7px] uppercase font-black tracking-wider">
+                              UNKNOWN
+                            </span>
+                          )}
                           {rec.isDemoData && (
                             <span className="px-1 py-0.2 rounded bg-rose-950 text-rose-300 border border-rose-500/40 text-[7px] uppercase font-black">
                               DEMO
@@ -767,6 +821,16 @@ export const CardArchiveScreen: React.FC = () => {
       <GoogleDriveSetupModal
         isOpen={driveSetupOpen}
         onClose={() => setDriveSetupOpen(false)}
+      />
+
+      <LinkScansModal
+        isOpen={linkScansModalOpen}
+        onClose={() => setLinkScansModalOpen(false)}
+        onLinkComplete={() => {
+          refreshArchive();
+          showToast('Cards successfully linked into one physical card!');
+        }}
+        records={records}
       />
     </div>
   );
