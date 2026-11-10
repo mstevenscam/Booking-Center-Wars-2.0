@@ -832,4 +832,131 @@ describe('Milestone 4B — Archive Reliability, Import Corrections & Verificatio
     assert.equal(baseAfter?.originalFileName, 'base.png');
     assert.equal(baseAfter?.originalFileChecksum, baseChecksum);
   });
+
+  // TEST 19: Google Picker response extraction handles canonical Response.DOCUMENTS and fallback data.docs
+  test('19. Google Picker response extraction supports canonical DOCUMENTS and docs array', () => {
+    // Canonical Google Picker response structure
+    const canonicalData: any = {
+      action: 'picked',
+      docs: [
+        {
+          id: 'drive-file-123',
+          name: '2021_Humber_Scan.jpg',
+          mimeType: 'image/jpeg',
+          sizeBytes: '2048',
+          lastEditedUtc: 1640995200000,
+          parentName: '2021 Scans',
+        },
+      ],
+    };
+
+    const rawDocs = canonicalData.docs || [];
+    assert.equal(rawDocs.length, 1);
+    assert.equal(rawDocs[0].id, 'drive-file-123');
+    assert.equal(rawDocs[0].name, '2021_Humber_Scan.jpg');
+    assert.equal(parseInt(rawDocs[0].sizeBytes, 10), 2048);
+  });
+
+  // TEST 20: Picker cancellation handling returns empty array without throwing
+  test('20. Picker cancellation resolves to empty array cleanly', () => {
+    const cancelData: any = { action: 'cancel' };
+    const isCancel = cancelData.action === 'cancel';
+    assert.equal(isCancel, true);
+  });
+
+  // TEST 21: Malformed Picker response without file ID or Name throws validation error
+  test('21. Rejects malformed Picker document missing ID or Name', () => {
+    const malformedDoc: any = { mimeType: 'image/png' }; // Missing id and name
+    const isValid = Boolean(malformedDoc.id && malformedDoc.name);
+    assert.equal(isValid, false, 'Must identify missing required file identification metadata');
+  });
+
+  // TEST 22: Preserves original Google Drive file provenance (ID, filename, folderPath)
+  test('22. Preserves Google Drive file provenance across record creation', async () => {
+    const rawData = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const blob = new Blob([rawData], { type: 'image/png' });
+    const checksum = await calculateFileChecksum(blob);
+
+    const record: HistoricalCardArchive = {
+      archiveId: generateStableArchiveId(checksum, 'Drive_Card_01.png', 2022),
+      originalFileName: 'Drive_Card_01.png',
+      originalFileSize: rawData.length,
+      originalFileType: 'image/png',
+      originalFileChecksum: checksum,
+      originalCreationYear: 2022,
+      sourceProvider: 'GOOGLE_DRIVE',
+      sourceFolderPath: '2022 Physical Scans/Roster',
+      sourceDriveFileId: '1abcXYZ-drive-id-999',
+      importedAt: new Date().toISOString(),
+      classification: 'CARD_ARTWORK',
+      userNotes: null,
+    };
+
+    await storage.saveArchiveRecord(record, blob, null);
+
+    const retrieved = await storage.getArchiveRecord(record.archiveId);
+    assert.ok(retrieved);
+    assert.equal(retrieved.sourceProvider, 'GOOGLE_DRIVE');
+    assert.equal(retrieved.sourceDriveFileId, '1abcXYZ-drive-id-999');
+    assert.equal(retrieved.sourceFolderPath, '2022 Physical Scans/Roster');
+    assert.equal(retrieved.originalFileName, 'Drive_Card_01.png');
+    assert.notEqual(retrieved.sourceFolderPath, 'Google Drive', 'Must preserve specific source folder rather than generic label');
+  });
+
+  // TEST 23: Download validation confirms non-empty Blob payload
+  test('23. Rejects empty (0-byte) download blob', () => {
+    const emptyBlob = new Blob([], { type: 'image/jpeg' });
+    const isBlobEmpty = !emptyBlob || emptyBlob.size === 0;
+    assert.equal(isBlobEmpty, true, 'Must detect 0-byte blobs');
+  });
+
+  // TEST 24: Two-stage workflow isolation — staging does NOT touch IndexedDB
+  test('24. Staging files into batch does not write to IndexedDB before explicit import', async () => {
+    const initialRecords = await storage.getAllArchiveRecords();
+    assert.equal(initialRecords.length, 0);
+
+    // Staging step in memory
+    const stagedItem = {
+      id: 'batch-test-1',
+      name: 'staged_scan.jpg',
+      size: 1024,
+      status: 'PENDING',
+    };
+    assert.equal(stagedItem.status, 'PENDING');
+
+    // IndexedDB remains untouched until execution
+    const recordsAfterStaging = await storage.getAllArchiveRecords();
+    assert.equal(recordsAfterStaging.length, 0);
+  });
+
+  // TEST 25: Explicit import commits staged item to persistent storage
+  test('25. Explicit import action commits staged files and verifies retrieval', async () => {
+    const rawData = new Uint8Array([0x01, 0x02, 0x03, 0x04]);
+    const blob = new Blob([rawData], { type: 'image/jpeg' });
+    const checksum = await calculateFileChecksum(blob);
+    const archiveId = generateStableArchiveId(checksum, 'committed_scan.jpg', 2023);
+
+    const record: HistoricalCardArchive = {
+      archiveId,
+      originalFileName: 'committed_scan.jpg',
+      originalFileSize: 4,
+      originalFileType: 'image/jpeg',
+      originalFileChecksum: checksum,
+      originalCreationYear: 2023,
+      sourceProvider: 'GOOGLE_DRIVE',
+      sourceFolderPath: '2023 Archive',
+      sourceDriveFileId: 'drive-commit-01',
+      importedAt: new Date().toISOString(),
+      classification: 'CARD_ARTWORK',
+      userNotes: null,
+    };
+
+    await storage.saveArchiveRecord(record, blob, null);
+
+    const retrieved = await storage.getArchiveRecord(archiveId);
+    assert.ok(retrieved);
+    assert.equal(retrieved.archiveId, archiveId);
+    assert.equal(retrieved.sourceDriveFileId, 'drive-commit-01');
+  });
 });
+

@@ -32,6 +32,7 @@ export class GoogleDriveService {
 
   /**
    * Checks whether Google Drive client credentials are provided via environment variables.
+   * Both VITE_GOOGLE_CLIENT_ID and VITE_GOOGLE_API_KEY are required for the intended Google Picker integration.
    */
   public getConfigStatus(): GoogleDriveConfigStatus {
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
@@ -42,7 +43,7 @@ export class GoogleDriveService {
     if (!apiKey) missing.push('VITE_GOOGLE_API_KEY');
 
     return {
-      isConfigured: Boolean(clientId),
+      isConfigured: Boolean(clientId && apiKey),
       clientId: clientId ? `${clientId.slice(0, 12)}...` : undefined,
       hasApiKey: Boolean(apiKey),
       missingConfig: missing,
@@ -169,8 +170,16 @@ export class GoogleDriveService {
 
   /**
    * Opens native Google Picker widget allowing the user to select card scans or PSDs.
+   * Uses DocsView configured in LIST mode with least-privilege drive.file scope and passes the API key.
    */
   public async openPicker(): Promise<DriveFileItem[]> {
+    const config = this.getConfigStatus();
+    if (!config.isConfigured) {
+      throw new Error(
+        `Google Drive configuration incomplete. Missing: ${config.missingConfig.join(', ')}`
+      );
+    }
+
     const token = this.accessToken || (await this.requestAccessToken());
     await this.loadPickerScript();
 
@@ -179,40 +188,111 @@ export class GoogleDriveService {
       throw new Error('Google Picker API not loaded');
     }
 
+    const apiKey = import.meta.env.VITE_GOOGLE_API_KEY || '';
     const pickerOrigin =
       window.location.ancestorOrigins && window.location.ancestorOrigins.length > 0
         ? window.location.ancestorOrigins[window.location.ancestorOrigins.length - 1]
         : window.location.origin;
 
     return new Promise((resolve, reject) => {
-      const view = new google.picker.DocsView(google.picker.ViewId.DOCS)
-        .setIncludeFolders(true)
-        .setSelectFolderEnabled(false);
+      try {
+        const view = new google.picker.DocsView(google.picker.ViewId.DOCS)
+          .setIncludeFolders(true)
+          .setSelectFolderEnabled(false);
 
-      const pickerBuilder = new google.picker.PickerBuilder()
-        .addView(view)
-        .setOAuthToken(token)
-        .setOrigin(pickerOrigin)
-        .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
-        .setTitle('Select Physical Card Scans & Templates')
-        .setCallback((data: any) => {
-          if (data.action === google.picker.Action.PICKED) {
-            const docs = data.docs || [];
-            const files: DriveFileItem[] = docs.map((doc: any) => ({
-              id: doc.id,
-              name: doc.name,
-              mimeType: doc.mimeType,
-              size: doc.sizeBytes ? parseInt(doc.sizeBytes, 10) : 0,
-              createdTime: doc.lastEditedUtc ? new Date(doc.lastEditedUtc).toISOString() : undefined,
-            }));
-            resolve(files);
-          } else if (data.action === google.picker.Action.CANCEL) {
-            resolve([]);
+        // DocsViewMode.LIST is explicitly recommended for drive.file scopes
+        if (google.picker.DocsViewMode && google.picker.DocsViewMode.LIST) {
+          view.setMode(google.picker.DocsViewMode.LIST);
+        }
+
+        const pickerBuilder = new google.picker.PickerBuilder()
+          .addView(view)
+          .setOAuthToken(token)
+          .setOrigin(pickerOrigin)
+          .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
+          .setTitle('Select Physical Card Scans & Templates');
+
+        if (apiKey) {
+          pickerBuilder.setDeveloperKey(apiKey);
+        }
+
+        pickerBuilder.setCallback((data: any) => {
+          try {
+            if (!data) return;
+
+            // Handle cancellation separately
+            if (data.action === google.picker.Action.CANCEL) {
+              resolve([]);
+              return;
+            }
+
+            // Handle selection
+            if (data.action === google.picker.Action.PICKED) {
+              // Canonical documented property is data[google.picker.Response.DOCUMENTS], fallback to data.docs
+              const rawDocs =
+                (google.picker.Response && data[google.picker.Response.DOCUMENTS]) ||
+                data.docs ||
+                [];
+
+              if (!Array.isArray(rawDocs)) {
+                reject(new Error('Invalid Picker selection response: documents list is malformed.'));
+                return;
+              }
+
+              if (rawDocs.length === 0) {
+                reject(new Error('Google Picker indicated an item was picked, but no document metadata was returned.'));
+                return;
+              }
+
+              const validFiles: DriveFileItem[] = [];
+              for (const doc of rawDocs) {
+                const id = doc.id || doc[google.picker.Document?.ID || 'id'];
+                const name = doc.name || doc[google.picker.Document?.NAME || 'name'];
+                const mimeType = doc.mimeType || doc[google.picker.Document?.MIME_TYPE || 'mimeType'] || 'application/octet-stream';
+
+                if (!id || !name) {
+                  reject(new Error('One or more selected Google Drive files are missing a valid File ID or Name.'));
+                  return;
+                }
+
+                // Parse size safely
+                const rawSize = doc.sizeBytes || doc[google.picker.Document?.SIZE_BYTES || 'sizeBytes'];
+                const size = rawSize ? parseInt(rawSize, 10) : 0;
+
+                // Extract timestamp if available
+                const rawTime = doc.lastEditedUtc || doc.createdTime;
+                const createdTime = rawTime ? new Date(rawTime).toISOString() : undefined;
+
+                // Extract parent folder name/path if available from Picker document metadata
+                let folderPath: string | undefined = undefined;
+                if (doc.parentId) {
+                  folderPath = doc.parentName || doc.parentId;
+                } else if (doc.parentName) {
+                  folderPath = doc.parentName;
+                }
+
+                validFiles.push({
+                  id,
+                  name,
+                  mimeType,
+                  size: isNaN(size) ? 0 : size,
+                  createdTime,
+                  folderPath,
+                });
+              }
+
+              resolve(validFiles);
+            }
+          } catch (callbackErr) {
+            reject(callbackErr);
           }
         });
 
-      const picker = pickerBuilder.build();
-      picker.setVisible(true);
+        const picker = pickerBuilder.build();
+        picker.setVisible(true);
+      } catch (builderErr) {
+        reject(builderErr);
+      }
     });
   }
 
@@ -273,6 +353,7 @@ export class GoogleDriveService {
 
   /**
    * Downloads raw unaltered binary file from Google Drive (alt=media).
+   * Confirms HTTP 200 OK and non-empty Blob payload.
    */
   public async downloadFileBinary(fileId: string): Promise<Blob> {
     const token = this.accessToken || (await this.requestAccessToken());
@@ -283,10 +364,35 @@ export class GoogleDriveService {
     });
 
     if (!res.ok) {
-      throw new Error(`Failed to download file from Drive (${fileId}): HTTP ${res.status}`);
+      let errorDetail = '';
+      try {
+        const errorJson = await res.json();
+        errorDetail = errorJson?.error?.message || '';
+      } catch {
+        // Response wasn't JSON
+      }
+
+      if (res.status === 401) {
+        throw new Error(`Authentication expired or invalid token (HTTP 401). ${errorDetail}`.trim());
+      } else if (res.status === 403) {
+        throw new Error(
+          `Permission denied (HTTP 403): Your account does not have read access to file ${fileId}. ${errorDetail}`.trim()
+        );
+      } else if (res.status === 404) {
+        throw new Error(`File not found in Google Drive (HTTP 404): ${fileId}`);
+      } else {
+        throw new Error(
+          `Google Drive download failed (HTTP ${res.status} ${res.statusText}): ${errorDetail || fileId}`
+        );
+      }
     }
 
-    return await res.blob();
+    const blob = await res.blob();
+    if (!blob || blob.size === 0) {
+      throw new Error(`Downloaded empty file content (0 bytes) for file ID ${fileId}`);
+    }
+
+    return blob;
   }
 }
 

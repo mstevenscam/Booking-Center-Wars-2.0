@@ -70,6 +70,9 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const [failedItems, setFailedItems] = useState<{ id: string; name: string; error: string }[]>([]);
   const [driveSetupOpen, setDriveSetupOpen] = useState(false);
   const [driveConnecting, setDriveConnecting] = useState(false);
+  const [driveError, setDriveError] = useState<{ title: string; message: string; type: 'AUTH' | 'PERMISSION' | 'DOWNLOAD' | 'CONFIG' | 'MALFORMED' | 'GENERAL' } | null>(null);
+  const [driveProgress, setDriveProgress] = useState<{ current: number; total: number; filename: string } | null>(null);
+  const [driveNotice, setDriveNotice] = useState<string | null>(null);
   const [aiAnalyzingId, setAiAnalyzingId] = useState<string | null>(null);
   const [storageStatus, setStorageStatus] = useState<StorageStatus>({
     isPersistent: true,
@@ -271,61 +274,137 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
   // Google Drive connect & pick
   const handleConnectGoogleDrive = async () => {
+    setDriveError(null);
+    setDriveNotice(null);
+
     if (!driveStatus.isConfigured) {
       setDriveSetupOpen(true);
       return;
     }
 
     setDriveConnecting(true);
+    setDriveProgress(null);
+
     try {
       const pickedFiles = await googleDriveService.openPicker();
+
+      // Clean cancellation by user
       if (pickedFiles.length === 0) {
+        setDriveNotice('Selection canceled. No files were chosen from Google Drive.');
         setDriveConnecting(false);
         return;
       }
 
       setIsProcessingFiles(true);
       const newItems: ImportBatchItem[] = [];
+      const downloadFailures: { name: string; error: string }[] = [];
 
       for (let i = 0; i < pickedFiles.length; i++) {
         const driveItem = pickedFiles[i];
-        const blob = await googleDriveService.downloadFileBinary(driveItem.id);
-        const checksum = await calculateFileChecksum(blob);
-        const classification = classifyFile(driveItem.name, driveItem.mimeType);
-        const creationYear = extractYearFromFilename(driveItem.name, driveItem.folderPath);
-        const dupCheck = await archiveStorage.checkDuplicate(checksum, driveItem.id);
-
-        let previewUrl: string | null = null;
-        if (classification === 'CARD_ARTWORK') {
-          previewUrl = URL.createObjectURL(blob);
-        }
-
-        newItems.push({
-          id: `drive-${Date.now()}-${i}`,
-          file: blob,
-          name: driveItem.name,
-          type: driveItem.mimeType,
-          size: driveItem.size || blob.size,
-          checksum,
-          creationYear,
-          sourceFolderPath: driveItem.folderPath || 'Google Drive',
-          sourceDriveFileId: driveItem.id,
-          sourceProvider: 'GOOGLE_DRIVE',
-          classification,
-          previewUrl,
-          isDuplicate: dupCheck.isDuplicate,
-          duplicateReason: dupCheck.reason,
-          matchedArchiveId: dupCheck.matchedRecord?.archiveId,
-          status: 'PENDING',
+        setDriveProgress({
+          current: i + 1,
+          total: pickedFiles.length,
+          filename: driveItem.name,
         });
+
+        try {
+          const blob = await googleDriveService.downloadFileBinary(driveItem.id);
+          const checksum = await calculateFileChecksum(blob);
+          const classification = classifyFile(driveItem.name, driveItem.mimeType);
+          const creationYear = extractYearFromFilename(driveItem.name, driveItem.folderPath);
+          const dupCheck = await archiveStorage.checkDuplicate(checksum, driveItem.id);
+
+          let previewUrl: string | null = null;
+          if (classification === 'CARD_ARTWORK') {
+            previewUrl = URL.createObjectURL(blob);
+          }
+
+          newItems.push({
+            id: `drive-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 7)}`,
+            file: blob,
+            name: driveItem.name,
+            type: driveItem.mimeType,
+            size: driveItem.size || blob.size,
+            checksum,
+            creationYear,
+            sourceFolderPath: driveItem.folderPath || null,
+            sourceDriveFileId: driveItem.id,
+            sourceProvider: 'GOOGLE_DRIVE',
+            classification,
+            previewUrl,
+            isDuplicate: dupCheck.isDuplicate,
+            duplicateReason: dupCheck.reason,
+            matchedArchiveId: dupCheck.matchedRecord?.archiveId,
+            status: 'PENDING',
+          });
+        } catch (itemErr: any) {
+          downloadFailures.push({
+            name: driveItem.name,
+            error: itemErr.message || 'Download failed',
+          });
+        }
       }
 
-      setSourceProvider('GOOGLE_DRIVE');
-      setBatchItems(prev => [...prev, ...newItems]);
-      setIsProcessingFiles(false);
-      setStep(3);
+      if (newItems.length > 0) {
+        setSourceProvider('GOOGLE_DRIVE');
+        setBatchItems(prev => [...prev, ...newItems]);
+        setDriveProgress(null);
+        setIsProcessingFiles(false);
+        setStep(3); // Advance to Step 3: Review Batch
+
+        if (downloadFailures.length > 0) {
+          setDriveError({
+            title: 'Partial Download Failure',
+            message: `${downloadFailures.length} of ${pickedFiles.length} file(s) failed to download: ${downloadFailures.map(f => `${f.name} (${f.error})`).join(', ')}. Successfully staged ${newItems.length} card(s).`,
+            type: 'DOWNLOAD',
+          });
+        }
+      } else {
+        // Every selected file failed to download
+        setDriveProgress(null);
+        setIsProcessingFiles(false);
+        setDriveError({
+          title: 'Google Drive Download Failed',
+          message: `None of the selected files could be downloaded. Details: ${downloadFailures.map(f => `${f.name}: ${f.error}`).join('; ')}`,
+          type: 'DOWNLOAD',
+        });
+      }
     } catch (err: any) {
-      alert(`Google Drive connection error: ${err.message}`);
+      setDriveProgress(null);
+      setIsProcessingFiles(false);
+      const msg = err?.message || String(err);
+
+      if (msg.includes('OAuth Error') || msg.includes('access_denied') || msg.includes('Authentication expired') || msg.includes('HTTP 401')) {
+        setDriveError({
+          title: 'Google Authentication Error',
+          message: msg,
+          type: 'AUTH',
+        });
+      } else if (msg.includes('Permission denied') || msg.includes('HTTP 403') || msg.includes('read access')) {
+        setDriveError({
+          title: 'Google Drive Permission Error',
+          message: msg,
+          type: 'PERMISSION',
+        });
+      } else if (msg.includes('configuration incomplete') || msg.includes('Missing:')) {
+        setDriveError({
+          title: 'Configuration Incomplete',
+          message: msg,
+          type: 'CONFIG',
+        });
+      } else if (msg.includes('malformed') || msg.includes('missing a valid File ID')) {
+        setDriveError({
+          title: 'Malformed Google Picker Data',
+          message: msg,
+          type: 'MALFORMED',
+        });
+      } else {
+        setDriveError({
+          title: 'Google Drive Connection Error',
+          message: msg,
+          type: 'GENERAL',
+        });
+      }
     } finally {
       setDriveConnecting(false);
     }
@@ -489,6 +568,74 @@ export const ImportModal: React.FC<ImportModalProps> = ({
           {/* STEP 1: CHOOSE SOURCE */}
           {step === 1 && (
             <div className="p-6 sm:p-8 overflow-y-auto space-y-6">
+              {/* Drive Error Banner */}
+              {driveError && (
+                <div className="p-4 rounded-2xl bg-rose-950/40 border-2 border-rose-500/50 text-rose-200 flex items-start gap-3 animate-in fade-in">
+                  <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-bold text-sm text-rose-300 flex items-center justify-between">
+                      <span>{driveError.title}</span>
+                      <button
+                        onClick={() => setDriveError(null)}
+                        className="text-rose-400 hover:text-white p-1 rounded-lg"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <p className="text-xs text-rose-200/90 mt-1 leading-relaxed break-words">
+                      {driveError.message}
+                    </p>
+                    {driveError.type === 'PERMISSION' && (
+                      <div className="mt-2 text-[11px] text-rose-300/80 bg-rose-950/60 p-2 rounded-lg border border-rose-800/40">
+                        <strong>Note on drive.file scope:</strong> Only files selected directly via the Google Picker window can be read. If your Google Cloud project credentials or OAuth consent configuration have changed, ensure the user account is added as a Test User.
+                      </div>
+                    )}
+                    {driveError.type === 'CONFIG' && (
+                      <button
+                        onClick={() => setDriveSetupOpen(true)}
+                        className="mt-2 px-3 py-1 bg-rose-900/60 hover:bg-rose-800 text-rose-100 rounded-lg text-xs font-semibold inline-flex items-center gap-1"
+                      >
+                        Open Setup Guide
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Progress Indicator while downloading Drive files */}
+              {driveProgress && (
+                <div className="p-4 rounded-2xl bg-sky-950/40 border-2 border-sky-500/50 text-sky-200 flex items-center gap-3 animate-in fade-in">
+                  <RefreshCw className="w-5 h-5 text-sky-400 animate-spin shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-bold text-xs text-sky-300 flex items-center justify-between">
+                      <span>Downloading Google Drive Files...</span>
+                      <span className="font-mono text-sky-400">
+                        {driveProgress.current} / {driveProgress.total}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-300 truncate mt-0.5 font-mono">
+                      {driveProgress.filename}
+                    </div>
+                    <div className="w-full bg-slate-900 rounded-full h-1.5 mt-2 overflow-hidden border border-slate-800">
+                      <div
+                        className="bg-sky-400 h-full transition-all duration-300"
+                        style={{ width: `${(driveProgress.current / driveProgress.total) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Drive Cancellation / Soft Notice */}
+              {driveNotice && (
+                <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 text-xs flex items-center justify-between animate-in fade-in">
+                  <span>{driveNotice}</span>
+                  <button onClick={() => setDriveNotice(null)} className="text-slate-400 hover:text-white">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
               <p className="text-xs text-slate-400 leading-relaxed max-w-2xl">
                 Import physical card scans (JPG, PNG, WEBP, TIFF) and original Photoshop templates (PSD). 
                 Files are cryptographically verified with SHA-256 and stored in their unaltered original binary state.
