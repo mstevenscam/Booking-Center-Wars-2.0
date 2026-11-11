@@ -40,6 +40,7 @@ import {
 import { HistoricalCardArchive, PlayableCardDefinition, ArchiveExportBundle } from '../types';
 import { analyzeCardFilename, pairCardBatch } from '../cardPairing';
 import { normalizeArchiveRecord, resolveAssetBinaryKey, generateAssetId, getCardArchiveSideStatus } from '../cardAccessors';
+import { isEligibleFrontScanRecord, isEligibleBackScanRecord } from '../LinkScansModal';
 
 describe('Milestone 4B — Archive Reliability, Import Corrections & Verification', () => {
   let storage: ArchiveStorage;
@@ -2191,6 +2192,213 @@ describe('Milestone 4B — Archive Reliability, Import Corrections & Verificatio
     assert.equal(p2.archiveId, bId, 'Playable 2 must be repointed back to secondary record');
     // play3 was created on primary, must remain linked to fId
     assert.equal(p3.archiveId, fId, 'Playable 3 must remain linked to primary record');
+  });
+
+  // TEST 49: Conservative filename classification for generic, numbered, and ambiguous files
+  test('49. Conservative filename classification identifies generic and ambiguous scans as UNKNOWN without silently assuming FRONT', () => {
+    // Generic scanning and document keywords must be UNKNOWN
+    assert.equal(analyzeCardFilename('scan.png').side, 'UNKNOWN');
+    assert.equal(analyzeCardFilename('document.jpg').side, 'UNKNOWN');
+    assert.equal(analyzeCardFilename('image_001.png').side, 'UNKNOWN');
+    assert.equal(analyzeCardFilename('scan_001.jpg').side, 'UNKNOWN');
+    assert.equal(analyzeCardFilename('document-1.pdf').side, 'UNKNOWN');
+    assert.equal(analyzeCardFilename('untitled.webp').side, 'UNKNOWN');
+    assert.equal(analyzeCardFilename('temp.jpg').side, 'UNKNOWN');
+    assert.equal(analyzeCardFilename('test.png').side, 'UNKNOWN');
+    assert.equal(analyzeCardFilename('photo.png').side, 'UNKNOWN');
+
+    // Purely numeric and symbol-prefixed files must be UNKNOWN
+    assert.equal(analyzeCardFilename('12345.png').side, 'UNKNOWN');
+    assert.equal(analyzeCardFilename('001.jpg').side, 'UNKNOWN');
+    assert.equal(analyzeCardFilename('???_symbol_card.png').side, 'UNKNOWN');
+    assert.equal(analyzeCardFilename('ambiguous_file.png').side, 'UNKNOWN');
+    assert.equal(analyzeCardFilename('random_unclassified.jpg').side, 'UNKNOWN');
+
+    // Explicit suffixes must always identify FRONT and BACK
+    assert.equal(analyzeCardFilename('griff_front.png').side, 'FRONT');
+    assert.equal(analyzeCardFilename('griff_back.png').side, 'BACK');
+    assert.equal(analyzeCardFilename('scan_front.png').side, 'FRONT');
+    assert.equal(analyzeCardFilename('scan_back.png').side, 'BACK');
+
+    // Confirmed card conventions without explicit suffix:
+    // Recognized prefix:
+    assert.equal(analyzeCardFilename('hockeycard_PAIGE.png').side, 'FRONT');
+    assert.equal(analyzeCardFilename('card_001.png').side, 'FRONT');
+    // Year-prefixed archive files:
+    assert.equal(analyzeCardFilename('1999_Dave_Maestro.jpg').side, 'FRONT');
+    assert.equal(analyzeCardFilename('2021_Sarah_Cable_Scan.jpg').side, 'FRONT');
+    // Structured multi-token persona names:
+    assert.equal(analyzeCardFilename('Dave_Rig_Tech.JPG').side, 'FRONT');
+  });
+
+  // TEST 50: Automatic pairing guardrail prevents auto-pairing UNKNOWN or ambiguous assets
+  test('50. Automatic pairing guardrails isolate UNKNOWN files and never pair generic scans', () => {
+    // 1. Generic scan.png + scan_back.png: scan.png is UNKNOWN, so must NOT pair as CONFIRMED
+    const genericBatch = [
+      { name: 'scan.png', classification: 'CARD_ARTWORK' as const },
+      { name: 'scan_back.png', classification: 'CARD_ARTWORK' as const },
+    ];
+    const genericPairs = pairCardBatch(genericBatch);
+    assert.equal(genericPairs.length, 1);
+    assert.equal(genericPairs[0].status, 'UNKNOWN_SIDE', 'Generic scan must not be auto-paired as CONFIRMED');
+    assert.notEqual(genericPairs[0].status, 'CONFIRMED');
+
+    // 2. Standalone generic document
+    const docBatch = [{ name: 'document.jpg', classification: 'CARD_ARTWORK' as const }];
+    const docPairs = pairCardBatch(docBatch);
+    assert.equal(docPairs.length, 1);
+    assert.equal(docPairs[0].status, 'UNKNOWN_SIDE');
+
+    // 3. Explicit front and back suffixes DO confirm pairing even for scan files
+    const explicitBatch = [
+      { name: 'scan_front.png', classification: 'CARD_ARTWORK' as const },
+      { name: 'scan_back.png', classification: 'CARD_ARTWORK' as const },
+    ];
+    const explicitPairs = pairCardBatch(explicitBatch);
+    assert.equal(explicitPairs.length, 1);
+    assert.equal(explicitPairs[0].status, 'CONFIRMED');
+    assert.equal(explicitPairs[0].front?.name, 'scan_front.png');
+    assert.equal(explicitPairs[0].back?.name, 'scan_back.png');
+
+    // 4. Confirmed PAIGE pairing is preserved
+    const paigeBatch = [
+      { name: 'hockeycard_PAIGE.png', classification: 'CARD_ARTWORK' as const },
+      { name: 'hockeycard_paige_back.png', classification: 'CARD_ARTWORK' as const },
+    ];
+    const paigePairs = pairCardBatch(paigeBatch);
+    assert.equal(paigePairs.length, 1);
+    assert.equal(paigePairs[0].status, 'CONFIRMED');
+
+    // 5. Mixed extension pairing is preserved
+    const mixedBatch = [
+      { name: 'card_001.png', classification: 'CARD_ARTWORK' as const },
+      { name: 'card_001_back.tif', classification: 'CARD_ARTWORK' as const },
+    ];
+    const mixedPairs = pairCardBatch(mixedBatch);
+    assert.equal(mixedPairs.length, 1);
+    assert.equal(mixedPairs[0].status, 'CONFIRMED');
+  });
+
+  // TEST 51: Manual-link dropdown candidate filtering strictly isolates FRONT and BACK records
+  test('51. Manual-link dropdown filtering strictly isolates FRONT and BACK records, excluding UNKNOWN, paired, and non-artwork', () => {
+    const dummyProvenance = (side: 'FRONT' | 'BACK' | 'UNKNOWN', name: string) => ({
+      assetId: generateAssetId(),
+      side,
+      binaryStorageKey: 'dummy-key',
+      fileName: name,
+      fileType: 'image/png',
+      fileSize: 100,
+      fileChecksum: 'sha256-dummy',
+      sourceProvider: 'LOCAL_UPLOAD' as const,
+      sourceFolderPath: null,
+      sourceDriveFileId: null,
+      importedAt: new Date().toISOString(),
+    });
+
+    const frontRecord: HistoricalCardArchive = {
+      archiveId: 'arc-eligible-front',
+      originalFileName: 'hockeycard_PAIGE.png',
+      originalFileType: 'image/png',
+      originalFileSize: 100,
+      originalFileChecksum: 'checksum-front',
+      originalCreationYear: 2021,
+      sourceProvider: 'LOCAL_UPLOAD',
+      sourceFolderPath: null,
+      sourceDriveFileId: null,
+      importedAt: new Date().toISOString(),
+      classification: 'CARD_ARTWORK',
+      userNotes: null,
+      frontAsset: dummyProvenance('FRONT', 'hockeycard_PAIGE.png'),
+      backAsset: null,
+    };
+
+    const backRecord: HistoricalCardArchive = {
+      archiveId: 'arc-eligible-back',
+      originalFileName: 'hockeycard_paige_back.png',
+      originalFileType: 'image/png',
+      originalFileSize: 100,
+      originalFileChecksum: 'checksum-back',
+      originalCreationYear: 2021,
+      sourceProvider: 'LOCAL_UPLOAD',
+      sourceFolderPath: null,
+      sourceDriveFileId: null,
+      importedAt: new Date().toISOString(),
+      classification: 'CARD_ARTWORK',
+      userNotes: null,
+      frontAsset: null,
+      backAsset: dummyProvenance('BACK', 'hockeycard_paige_back.png'),
+    };
+
+    const unknownRecord: HistoricalCardArchive = {
+      archiveId: 'arc-ineligible-unknown',
+      originalFileName: 'scan.png',
+      originalFileType: 'image/png',
+      originalFileSize: 100,
+      originalFileChecksum: 'checksum-unknown',
+      originalCreationYear: 2021,
+      sourceProvider: 'LOCAL_UPLOAD',
+      sourceFolderPath: null,
+      sourceDriveFileId: null,
+      importedAt: new Date().toISOString(),
+      classification: 'CARD_ARTWORK',
+      userNotes: null,
+      frontAsset: dummyProvenance('UNKNOWN', 'scan.png'),
+      backAsset: null,
+    };
+
+    const pairedRecord: HistoricalCardArchive = {
+      archiveId: 'arc-ineligible-paired',
+      originalFileName: 'hockeycard_PAIGE.png',
+      originalFileType: 'image/png',
+      originalFileSize: 200,
+      originalFileChecksum: 'checksum-paired',
+      originalCreationYear: 2021,
+      sourceProvider: 'LOCAL_UPLOAD',
+      sourceFolderPath: null,
+      sourceDriveFileId: null,
+      importedAt: new Date().toISOString(),
+      classification: 'CARD_ARTWORK',
+      userNotes: null,
+      frontAsset: dummyProvenance('FRONT', 'hockeycard_PAIGE.png'),
+      backAsset: dummyProvenance('BACK', 'hockeycard_paige_back.png'),
+    };
+
+    const templateRecord: HistoricalCardArchive = {
+      archiveId: 'arc-ineligible-psd',
+      originalFileName: 'Card_Template.psd',
+      originalFileType: 'image/vnd.adobe.photoshop',
+      originalFileSize: 1000,
+      originalFileChecksum: 'checksum-psd',
+      originalCreationYear: 2021,
+      sourceProvider: 'LOCAL_UPLOAD',
+      sourceFolderPath: null,
+      sourceDriveFileId: null,
+      importedAt: new Date().toISOString(),
+      classification: 'PHOTOSHOP_TEMPLATE',
+      userNotes: null,
+      frontAsset: dummyProvenance('FRONT', 'Card_Template.psd'),
+      backAsset: null,
+    };
+
+    // 1. FRONT Candidate Verification
+    assert.equal(isEligibleFrontScanRecord(frontRecord), true, 'FRONT record must be eligible in Front dropdown');
+    assert.equal(isEligibleBackScanRecord(frontRecord), false, 'FRONT record can NEVER appear as BACK candidate');
+
+    // 2. BACK Candidate Verification
+    assert.equal(isEligibleBackScanRecord(backRecord), true, 'BACK record must be eligible in Back dropdown');
+    assert.equal(isEligibleFrontScanRecord(backRecord), false, 'BACK record can NEVER appear as FRONT candidate');
+
+    // 3. UNKNOWN Side Exclusion
+    assert.equal(isEligibleFrontScanRecord(unknownRecord), false, 'UNKNOWN side record must be excluded from Front dropdown');
+    assert.equal(isEligibleBackScanRecord(unknownRecord), false, 'UNKNOWN side record must be excluded from Back dropdown');
+
+    // 4. Paired (Two-Sided) Record Exclusion
+    assert.equal(isEligibleFrontScanRecord(pairedRecord), false, 'Already-paired record must be excluded from Front dropdown');
+    assert.equal(isEligibleBackScanRecord(pairedRecord), false, 'Already-paired record must be excluded from Back dropdown');
+
+    // 5. Non-Artwork (PSD template) Exclusion
+    assert.equal(isEligibleFrontScanRecord(templateRecord), false, 'PHOTOSHOP_TEMPLATE must be excluded from Front dropdown');
+    assert.equal(isEligibleBackScanRecord(templateRecord), false, 'PHOTOSHOP_TEMPLATE must be excluded from Back dropdown');
   });
 });
 

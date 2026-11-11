@@ -28,10 +28,14 @@ export function getCardArchiveSideStatus(record: HistoricalCardArchive): 'PAIRED
 
   if (hasFront && hasBack) return 'PAIRED';
   if (hasFront) {
-    return record.frontAsset?.side === 'UNKNOWN' ? 'SIDE_UNKNOWN' : 'FRONT_ONLY';
+    if (record.frontAsset?.side === 'FRONT') return 'FRONT_ONLY';
+    if (record.frontAsset?.side === 'BACK') return 'BACK_ONLY';
+    return 'SIDE_UNKNOWN';
   }
   if (hasBack) {
-    return record.backAsset?.side === 'UNKNOWN' ? 'SIDE_UNKNOWN' : 'BACK_ONLY';
+    if (record.backAsset?.side === 'BACK') return 'BACK_ONLY';
+    if (record.backAsset?.side === 'FRONT') return 'FRONT_ONLY';
+    return 'SIDE_UNKNOWN';
   }
   return 'SIDE_UNKNOWN';
 }

@@ -30,6 +30,49 @@ interface LinkScansModalProps {
   records: HistoricalCardArchive[];
 }
 
+/**
+ * Evaluates whether an archive record is eligible as a FRONT candidate for manual linking.
+ * 
+ * Rules:
+ * - Must be classified as CARD_ARTWORK (photoshop templates and other assets are excluded).
+ * - Must be single-sided (not already paired with a back scan).
+ * - Must be explicitly classified FRONT (side !== 'UNKNOWN' and side !== 'BACK').
+ */
+export function isEligibleFrontScanRecord(r: HistoricalCardArchive): boolean {
+  if (r.classification !== 'CARD_ARTWORK') return false;
+  // Exclude two-sided / already paired records
+  if (r.frontAsset && r.backAsset) return false;
+  // Must have a front asset and no back asset
+  if (!r.frontAsset || r.backAsset) return false;
+  // Must be explicitly classified FRONT
+  return r.frontAsset.side === 'FRONT';
+}
+
+/**
+ * Evaluates whether an archive record is eligible as a BACK candidate for manual linking.
+ * 
+ * Rules:
+ * - Must be classified as CARD_ARTWORK (photoshop templates and other assets are excluded).
+ * - Must be single-sided (not already paired with a front scan).
+ * - Must be explicitly classified BACK (side !== 'UNKNOWN' and side !== 'FRONT').
+ * - A FRONT record can NEVER appear as a BACK candidate.
+ */
+export function isEligibleBackScanRecord(r: HistoricalCardArchive): boolean {
+  if (r.classification !== 'CARD_ARTWORK') return false;
+  // Exclude two-sided / already paired records
+  if (r.frontAsset && r.backAsset) return false;
+  // If r.frontAsset exists with side FRONT, it is NEVER a back candidate!
+  if (r.frontAsset && r.frontAsset.side === 'FRONT') return false;
+  // Must be explicitly classified BACK
+  if (r.backAsset) {
+    return r.backAsset.side === 'BACK' && !r.frontAsset;
+  }
+  if (r.frontAsset) {
+    return r.frontAsset.side === 'BACK' && !r.backAsset;
+  }
+  return false;
+}
+
 export const LinkScansModal: React.FC<LinkScansModalProps> = ({
   isOpen,
   onClose,
@@ -44,20 +87,11 @@ export const LinkScansModal: React.FC<LinkScansModalProps> = ({
   const [primaryThumb, setPrimaryThumb] = useState<string | null>(null);
   const [secondaryThumb, setSecondaryThumb] = useState<string | null>(null);
 
-  // Eligible single-sided records for FRONT scan: CARD_ARTWORK only, not paired, no backAsset, not UNKNOWN
-  const eligibleFrontRecords = records.filter(
-    r => r.classification === 'CARD_ARTWORK' && 
-         !(r.frontAsset && r.backAsset) && 
-         !r.backAsset && 
-         r.frontAsset?.side !== 'UNKNOWN'
-  );
+  // Eligible single-sided records for FRONT scan: CARD_ARTWORK only, not paired, explicitly FRONT
+  const eligibleFrontRecords = records.filter(isEligibleFrontScanRecord);
 
-  // Eligible records for BACK scan: CARD_ARTWORK only, not paired, side not UNKNOWN
-  const eligibleBackRecords = records.filter(
-    r => r.classification === 'CARD_ARTWORK' && 
-         !(r.frontAsset && r.backAsset) && 
-         (r.backAsset ? r.backAsset.side !== 'UNKNOWN' : r.frontAsset?.side !== 'UNKNOWN')
-  );
+  // Eligible single-sided records for BACK scan: CARD_ARTWORK only, not paired, explicitly BACK
+  const eligibleBackRecords = records.filter(isEligibleBackScanRecord);
 
   // Load preview thumbnails when selection changes
   useEffect(() => {
@@ -114,6 +148,18 @@ export const LinkScansModal: React.FC<LinkScansModalProps> = ({
     }
     if (primaryId === secondaryId) {
       setError('A card cannot be linked to itself.');
+      return;
+    }
+
+    const frontCandidate = records.find(r => r.archiveId === primaryId);
+    if (!frontCandidate || !isEligibleFrontScanRecord(frontCandidate)) {
+      setError('The selected front scan is ineligible or not classified as FRONT.');
+      return;
+    }
+
+    const backCandidate = records.find(r => r.archiveId === secondaryId);
+    if (!backCandidate || !isEligibleBackScanRecord(backCandidate)) {
+      setError('The selected back scan is ineligible or not classified as BACK.');
       return;
     }
 
