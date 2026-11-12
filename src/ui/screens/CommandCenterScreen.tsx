@@ -54,8 +54,8 @@ const SAMPLE_CARDS = [
     influence: 2,
     affiliations: ['Technician', 'Problem Solver'],
     keywords: ['Front Desk Guard'],
-    abilityName: 'Emergency Solder',
-    abilityDesc: 'Onboarding: Restore 3 Stamina to target damaged character.',
+    abilityName: 'Gaffer Tape Patch',
+    abilityDesc: 'Restore 3 Stamina to target friendly character.',
     flavor: '"If gaffer tape can\'t fix it, it\'s not broken enough."',
     avatarBg: 'from-amber-600 to-amber-900',
     legacyJoke: 'Historical card from 2019 banquet honoring Dave’s mythical 10-second cable untangling record.'
@@ -72,8 +72,8 @@ const SAMPLE_CARDS = [
     influence: 3,
     affiliations: ['Equipment Specialist', 'Administration'],
     keywords: ['Front Desk Guard'],
-    abilityName: 'Strict Check-In Policy',
-    abilityDesc: 'Whenever an opponent declares an attack, they must pay 1 additional Shift or lose 2 Morale.',
+    abilityName: 'Late Fines',
+    abilityDesc: 'Make selected opposing actions more expensive.',
     flavor: '"Your student ID expired three minutes ago. Step away from the RED camera."',
     avatarBg: 'from-purple-700 to-indigo-950',
     legacyJoke: 'Original 2021 gift card celebrating Maya’s uncompromising gear reservation security.'
@@ -108,8 +108,8 @@ const SAMPLE_CARDS = [
     influence: 0,
     affiliations: ['Chaos Agent'],
     keywords: [],
-    abilityName: 'Auditorium Blackout',
-    abilityDesc: 'Deal 2 damage to ALL characters on the counter. Put a Broken Lamp ticket into the Queue.',
+    abilityName: 'Cap Stone Order',
+    abilityDesc: 'Deal 2 damage to all characters on the battlefield.',
     flavor: '"It made a loud pop, and then someone started crying in 4K."',
     avatarBg: 'from-red-600 to-orange-950',
     legacyJoke: 'Based on the Great L-Building Lecture Hall Projector Meltdown of November 2018.'
@@ -126,8 +126,8 @@ const SAMPLE_CARDS = [
     influence: 0,
     affiliations: ['Equipment Specialist', 'Technician'],
     keywords: [],
-    abilityName: 'Triple Reinforced',
-    abilityDesc: 'Equip to friendly character. Grants +1 Power, +3 Stamina, and Front Desk Guard.',
+    abilityName: 'Staging Order 1',
+    abilityDesc: 'Opponents must deal with this character before attacking protected teammates.',
     flavor: '"Structural integrity is just a state of mind."',
     avatarBg: 'from-slate-700 to-zinc-900',
     legacyJoke: 'Honoring the roll of tape that held the entire Studio 3 lighting rig together for an entire semester.'

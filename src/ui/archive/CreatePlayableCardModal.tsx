@@ -25,6 +25,7 @@ import { HistoricalCardArchive, PlayableCardDefinition } from './types';
 import { CardType, CardRarity, Department, GameViewCard } from '../types';
 import { archiveStorage } from './storage';
 import { CardView } from '../components/CardView';
+import { OFFICIAL_ABILITIES_CATALOG } from '../../engine/abilities';
 
 interface CreatePlayableCardModalProps {
   archiveRecord: HistoricalCardArchive | null;
@@ -343,20 +344,61 @@ export const CreatePlayableCardModal: React.FC<CreatePlayableCardModalProps> = (
 
             {/* Ability */}
             <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
-              <label className="text-[10px] font-bold uppercase text-amber-400 block">
-                Special Ability (Optional)
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-bold uppercase text-amber-400 block">
+                  Special Ability (Optional)
+                </label>
+                <span className="text-[10px] text-slate-500">Official Presets</span>
+              </div>
+
+              {/* Official Ability Preset Selector */}
+              <div>
+                <select
+                  defaultValue=""
+                  onChange={(e) => {
+                    const preset = OFFICIAL_ABILITIES_CATALOG.find(a => a.name === e.target.value);
+                    if (preset) {
+                      setAbilityName(preset.name);
+                      setAbilityDesc(preset.description);
+                    }
+                  }}
+                  className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-200 text-xs mb-1"
+                >
+                  <option value="" disabled>Choose Official Ability Preset...</option>
+                  <optgroup label="Offensive Abilities">
+                    {OFFICIAL_ABILITIES_CATALOG.filter(a => a.category === 'OFFENSIVE').map(a => (
+                      <option key={a.id} value={a.name}>{a.name} — {a.action}</option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Defensive Abilities">
+                    {OFFICIAL_ABILITIES_CATALOG.filter(a => a.category === 'DEFENSIVE').map(a => (
+                      <option key={a.id} value={a.name}>{a.name} — {a.action}</option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Support Abilities">
+                    {OFFICIAL_ABILITIES_CATALOG.filter(a => a.category === 'SUPPORT').map(a => (
+                      <option key={a.id} value={a.name}>{a.name} — {a.action}</option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Disruption Abilities">
+                    {OFFICIAL_ABILITIES_CATALOG.filter(a => a.category === 'DISRUPTION').map(a => (
+                      <option key={a.id} value={a.name}>{a.name} — {a.action}</option>
+                    ))}
+                  </optgroup>
+                </select>
+              </div>
+
               <input
                 type="text"
                 value={abilityName}
                 onChange={(e) => setAbilityName(e.target.value)}
-                placeholder="Ability Name (e.g. Emergency Patch)"
+                placeholder="Ability Name (e.g. Gaffer Tape Patch)"
                 className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-200"
               />
               <textarea
                 value={abilityDesc}
                 onChange={(e) => setAbilityDesc(e.target.value)}
-                placeholder="Ability Description (e.g. Onboarding: Grant +2 Stamina Buffer to an adjacent ally.)"
+                placeholder="Ability Description (e.g. Restore 3 Stamina to target friendly character.)"
                 className="w-full h-14 px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-200 resize-none text-xs"
               />
             </div>

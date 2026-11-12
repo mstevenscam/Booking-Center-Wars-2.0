@@ -21,7 +21,8 @@ import {
   CANONICAL_ABILITY_CATALOG,
   EffectType,
   TargetFilter,
-  TriggerCondition
+  TriggerCondition,
+  getOfficialAbilityName
 } from './abilities.js';
 
 export type CardRarity =
@@ -204,9 +205,14 @@ export function validateImportedCard(raw: unknown): ImportValidationResult {
           warnings.push(`Ability '${abilityId}' trigger differs from canonical catalog definition.`);
         }
 
+        const rawName = String(ab.name || '');
+        const officialName = rawName
+          ? getOfficialAbilityName(rawName)
+          : (catalogMatch?.name || getOfficialAbilityName(abilityId));
+
         validatedAbilities.push({
           abilityId,
-          name: String(ab.name || abilityId),
+          name: officialName,
           trigger,
           targetFilter,
           effectType,

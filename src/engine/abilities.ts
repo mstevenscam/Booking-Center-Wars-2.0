@@ -170,7 +170,7 @@ export const CANONICAL_ABILITY_CATALOG: Record<string, AbilityDefinition> = {
   },
   ABILITY_RESERVATION_HOLD: {
     abilityId: 'ABILITY_RESERVATION_HOLD',
-    name: 'Reservation Hold',
+    name: 'Pending Approval',
     trigger: 'ON_PLAY',
     targetFilter: 'PENDING_QUEUE_TICKET',
     effectType: 'DISRUPT_QUEUE',
@@ -201,7 +201,7 @@ export const CANONICAL_ABILITY_CATALOG: Record<string, AbilityDefinition> = {
   },
   ABILITY_BENCH_TEST: {
     abilityId: 'ABILITY_BENCH_TEST',
-    name: 'Bench Test',
+    name: 'Troubleshooting',
     trigger: 'START_OF_SHIFT',
     targetFilter: 'RANDOM_FRIENDLY_CHARACTER',
     effectType: 'BUFF_STAT',
@@ -210,11 +210,21 @@ export const CANONICAL_ABILITY_CATALOG: Record<string, AbilityDefinition> = {
     duration: 'PERMANENT',
     customDescription: 'Give a random friendly character +1/+1 at the start of your shift.'
   },
+  ABILITY_SHORT_CIRCUIT: {
+    abilityId: 'ABILITY_SHORT_CIRCUIT',
+    name: 'Spotify Take over',
+    trigger: 'ON_PLAY',
+    targetFilter: 'ANY_ENEMY_CHARACTER',
+    effectType: 'DAMAGE',
+    primaryValue: 3,
+    requiresManualTarget: true,
+    customDescription: 'Deal 3 damage to an opposing character.'
+  },
 
   // Administration Department
   ABILITY_MANDATORY_REVIEW: {
     abilityId: 'ABILITY_MANDATORY_REVIEW',
-    name: 'Mandatory Review',
+    name: 'Snow Day',
     trigger: 'ON_PLAY',
     targetFilter: 'ANY_ENEMY_CHARACTER',
     effectType: 'RETURN_TO_HAND',
@@ -222,11 +232,30 @@ export const CANONICAL_ABILITY_CATALOG: Record<string, AbilityDefinition> = {
     requiresManualTarget: true,
     customDescription: 'Return an opposing character to its owner\'s hand.'
   },
+  ABILITY_BUDGET_REALLOCATION: {
+    abilityId: 'ABILITY_BUDGET_REALLOCATION',
+    name: 'Shift Help',
+    trigger: 'ON_PLAY',
+    targetFilter: 'SELF',
+    effectType: 'MODIFY_SHIFT',
+    primaryValue: 2,
+    secondaryValue: -1,
+    customDescription: 'Gain temporary Shift resources.'
+  },
+  ABILITY_BUREAUCRATIC_RED_TAPE: {
+    abilityId: 'ABILITY_BUREAUCRATIC_RED_TAPE',
+    name: 'Late Fines',
+    trigger: 'START_OF_SHIFT',
+    targetFilter: 'SELF',
+    effectType: 'MODIFY_SHIFT',
+    primaryValue: 0,
+    customDescription: 'Make selected opposing actions more expensive.'
+  },
 
   // Equipment Specialist Department
   ABILITY_HEAVY_FLIGHT_CASE: {
     abilityId: 'ABILITY_HEAVY_FLIGHT_CASE',
-    name: 'Heavy Flight Case',
+    name: 'Rapid Return',
     trigger: 'ON_DAMAGE_TAKEN',
     targetFilter: 'ATTACKER',
     effectType: 'DAMAGE',
@@ -235,7 +264,7 @@ export const CANONICAL_ABILITY_CATALOG: Record<string, AbilityDefinition> = {
   },
   ABILITY_CAGE_LOCKDOWN: {
     abilityId: 'ABILITY_CAGE_LOCKDOWN',
-    name: 'Cage Lockdown',
+    name: 'Timmy Run',
     trigger: 'ON_DEPLOY',
     targetFilter: 'ALL_FRIENDLY_CHARACTERS',
     effectType: 'BUFF_STAT',
@@ -248,7 +277,7 @@ export const CANONICAL_ABILITY_CATALOG: Record<string, AbilityDefinition> = {
   // Journalism Department
   ABILITY_EXPOSÉ_REPORT: {
     abilityId: 'ABILITY_EXPOSÉ_REPORT',
-    name: 'Exposé Report',
+    name: 'Boss Dirt',
     trigger: 'ON_DEPLOY',
     targetFilter: 'ENEMY_SUPERVISOR',
     effectType: 'DAMAGE',
@@ -259,7 +288,7 @@ export const CANONICAL_ABILITY_CATALOG: Record<string, AbilityDefinition> = {
   // Production Department
   ABILITY_ROLLING_SOUND: {
     abilityId: 'ABILITY_ROLLING_SOUND',
-    name: 'Rolling Sound',
+    name: 'Pin Over ride',
     trigger: 'ON_ATTACK',
     targetFilter: 'ALL_FRIENDLY_CHARACTERS',
     effectType: 'BUFF_STAT',
@@ -268,11 +297,20 @@ export const CANONICAL_ABILITY_CATALOG: Record<string, AbilityDefinition> = {
     duration: 'UNTIL_END_OF_TURN',
     customDescription: 'Whenever this character attacks, friendly characters gain +1 Power this turn.'
   },
+  ABILITY_HOT_LIGHTS: {
+    abilityId: 'ABILITY_HOT_LIGHTS',
+    name: 'Cap Stone Order',
+    trigger: 'ON_PLAY',
+    targetFilter: 'ALL_CHARACTERS',
+    effectType: 'DAMAGE',
+    primaryValue: 2,
+    customDescription: 'Deal 2 damage to all characters on the battlefield.'
+  },
 
   // Problem Solver Department
   ABILITY_ROOT_CAUSE_ANALYSIS: {
     abilityId: 'ABILITY_ROOT_CAUSE_ANALYSIS',
-    name: 'Root Cause Analysis',
+    name: 'Pin Access Removed',
     trigger: 'ON_DEPLOY',
     targetFilter: 'ANY_ENEMY_CHARACTER',
     effectType: 'SILENCE_CHARACTER',
@@ -280,22 +318,79 @@ export const CANONICAL_ABILITY_CATALOG: Record<string, AbilityDefinition> = {
     requiresManualTarget: true,
     customDescription: 'Silence target enemy character (removes all abilities and keyword buffs).'
   },
+  ABILITY_WORKAROUND: {
+    abilityId: 'ABILITY_WORKAROUND',
+    name: 'Gear Return',
+    trigger: 'ON_PLAY',
+    targetFilter: 'ANY_ENEMY_CHARACTER',
+    effectType: 'SILENCE_CHARACTER',
+    primaryValue: 0,
+    requiresManualTarget: true,
+    customDescription: 'Destroy or disable an opposing Gear or Equipment card.'
+  },
 
   // Chaos Agent Department
   ABILITY_UNATTENDED_RODENT: {
     abilityId: 'ABILITY_UNATTENDED_RODENT',
-    name: 'Unattended Rodent',
+    name: 'NO shift coverage',
     trigger: 'ON_CLOCK_OUT',
     targetFilter: 'RANDOM_ENEMY_CHARACTER',
     effectType: 'DAMAGE',
     primaryValue: 2,
     customDescription: 'When this character clocks out, deal 2 damage to a random enemy character.'
   },
+  ABILITY_MYSTERY_USB_DRIVE: {
+    abilityId: 'ABILITY_MYSTERY_USB_DRIVE',
+    name: 'Random Spotify Playlist',
+    trigger: 'ON_DEPLOY',
+    targetFilter: 'SELF',
+    effectType: 'DRAW_CARDS',
+    primaryValue: 1,
+    customDescription: 'Trigger a random beneficial or harmful outcome.'
+  },
+
+  // Defensive Keywords as Canonical Abilities
+  ABILITY_FRONT_DESK_GUARD: {
+    abilityId: 'ABILITY_FRONT_DESK_GUARD',
+    name: 'Staging Order 1',
+    trigger: 'START_OF_SHIFT',
+    targetFilter: 'SELF',
+    effectType: 'BUFF_STAT',
+    primaryValue: 0,
+    customDescription: 'Opponents must deal with this character before attacking protected teammates.'
+  },
+  ABILITY_DIVINE_LANYARD: {
+    abilityId: 'ABILITY_DIVINE_LANYARD',
+    name: 'Successful scan',
+    trigger: 'ON_DEPLOY',
+    targetFilter: 'SELF',
+    effectType: 'BUFF_STAT',
+    primaryValue: 0,
+    customDescription: 'Block the first incoming damage.'
+  },
+  ABILITY_AUDIT_IMMUNITY: {
+    abilityId: 'ABILITY_AUDIT_IMMUNITY',
+    name: 'Inventory Check',
+    trigger: 'ON_DEPLOY',
+    targetFilter: 'SELF',
+    effectType: 'BUFF_STAT',
+    primaryValue: 0,
+    customDescription: 'Protect a character from targeted opposing abilities.'
+  },
+  ABILITY_COFFEE_BREAK: {
+    abilityId: 'ABILITY_COFFEE_BREAK',
+    name: 'Red bull',
+    trigger: 'START_OF_SHIFT',
+    targetFilter: 'SELF',
+    effectType: 'HEAL_STAMINA',
+    primaryValue: 2,
+    customDescription: 'Recover Health at the beginning of a Shift if undamaged.'
+  },
 
   // Core Generic Baseline Abilities
   ABILITY_DIRECT_REPAIR: {
     abilityId: 'ABILITY_DIRECT_REPAIR',
-    name: 'Direct Repair',
+    name: 'Gaffer Tape Patch',
     trigger: 'ON_DEPLOY',
     targetFilter: 'ANY_FRIENDLY_CHARACTER',
     effectType: 'HEAL_STAMINA',
@@ -305,7 +400,7 @@ export const CANONICAL_ABILITY_CATALOG: Record<string, AbilityDefinition> = {
   },
   ABILITY_FIELD_PROMOTION: {
     abilityId: 'ABILITY_FIELD_PROMOTION',
-    name: 'Field Promotion',
+    name: 'Extra Pin',
     trigger: 'ON_DEPLOY',
     targetFilter: 'ANY_FRIENDLY_CHARACTER',
     effectType: 'BUFF_STAT',
@@ -317,7 +412,7 @@ export const CANONICAL_ABILITY_CATALOG: Record<string, AbilityDefinition> = {
   },
   ABILITY_EMERGENCY_FUNDING: {
     abilityId: 'ABILITY_EMERGENCY_FUNDING',
-    name: 'Emergency Funding',
+    name: 'Shift Help',
     trigger: 'ON_PLAY',
     targetFilter: 'SELF',
     effectType: 'MODIFY_SHIFT',
@@ -326,7 +421,7 @@ export const CANONICAL_ABILITY_CATALOG: Record<string, AbilityDefinition> = {
   },
   ABILITY_SUPERVISOR_COUNSEL: {
     abilityId: 'ABILITY_SUPERVISOR_COUNSEL',
-    name: 'Supervisor Counsel',
+    name: 'Happy Vicky',
     trigger: 'ON_DEPLOY',
     targetFilter: 'FRIENDLY_SUPERVISOR',
     effectType: 'HEAL_MORALE',
@@ -335,15 +430,374 @@ export const CANONICAL_ABILITY_CATALOG: Record<string, AbilityDefinition> = {
   },
   ABILITY_DISCIPLINARY_DISMISSAL: {
     abilityId: 'ABILITY_DISCIPLINARY_DISMISSAL',
-    name: 'Disciplinary Dismissal',
+    name: 'Shift Exchange',
     trigger: 'ON_PLAY',
     targetFilter: 'ANY_ENEMY_CHARACTER',
     effectType: 'DESTROY_CHARACTER',
     primaryValue: 0,
     requiresManualTarget: true,
-    customDescription: 'Retire an enemy character directly to the Breakroom.'
+    customDescription: 'Remove an opposing character from the battlefield.'
   }
 };
+
+// ============================================================================
+// 2B. OFFICIAL ABILITY PRESETS & BACKWARD COMPATIBILITY
+// ============================================================================
+
+export interface OfficialAbilityPreset {
+  id: string;
+  name: string;
+  category: 'OFFENSIVE' | 'DEFENSIVE' | 'SUPPORT' | 'DISRUPTION';
+  action: string;
+  description: string;
+  trigger: TriggerCondition;
+  effectType: EffectType;
+}
+
+export const OFFICIAL_ABILITIES_CATALOG: OfficialAbilityPreset[] = [
+  // OFFENSIVE ABILITIES
+  {
+    id: 'ABILITY_SHORT_CIRCUIT',
+    name: 'Spotify Take over',
+    category: 'OFFENSIVE',
+    action: 'Deal damage to an opposing character.',
+    description: 'Deal 3 damage to an opposing character.',
+    trigger: 'ON_PLAY',
+    effectType: 'DAMAGE'
+  },
+  {
+    id: 'ABILITY_WORKAROUND',
+    name: 'Gear Return',
+    category: 'OFFENSIVE',
+    action: 'Destroy or disable an opposing Gear or Equipment card.',
+    description: 'Destroy or disable an opposing Gear or Equipment card.',
+    trigger: 'ON_PLAY',
+    effectType: 'SILENCE_CHARACTER'
+  },
+  {
+    id: 'ABILITY_ROLLING_SOUND',
+    name: 'Pin Over ride',
+    category: 'OFFENSIVE',
+    action: 'Gain additional offensive strength for one turn.',
+    description: 'Whenever this character attacks, friendly characters gain +1 Power this turn.',
+    trigger: 'ON_ATTACK',
+    effectType: 'BUFF_STAT'
+  },
+  {
+    id: 'ABILITY_HOT_LIGHTS',
+    name: 'Cap Stone Order',
+    category: 'OFFENSIVE',
+    action: 'Deal damage to multiple characters.',
+    description: 'Deal 2 damage to all characters on the battlefield.',
+    trigger: 'ON_PLAY',
+    effectType: 'DAMAGE'
+  },
+  {
+    id: 'ABILITY_DISCIPLINARY_DISMISSAL',
+    name: 'Shift Exchange',
+    category: 'OFFENSIVE',
+    action: 'Remove an opposing character from the battlefield.',
+    description: 'Remove an opposing character from the battlefield.',
+    trigger: 'ON_PLAY',
+    effectType: 'DESTROY_CHARACTER'
+  },
+  {
+    id: 'ABILITY_UNATTENDED_RODENT',
+    name: 'NO shift coverage',
+    category: 'OFFENSIVE',
+    action: 'When this character clocks out, damage a random opponent.',
+    description: 'When this character clocks out, deal 2 damage to a random enemy character.',
+    trigger: 'ON_CLOCK_OUT',
+    effectType: 'DAMAGE'
+  },
+
+  // DEFENSIVE ABILITIES
+  {
+    id: 'ABILITY_FRONT_DESK_GUARD',
+    name: 'Staging Order 1',
+    category: 'DEFENSIVE',
+    action: 'Opponents must deal with this character before attacking protected teammates.',
+    description: 'Opponents must deal with this character before attacking protected teammates.',
+    trigger: 'START_OF_SHIFT',
+    effectType: 'BUFF_STAT'
+  },
+  {
+    id: 'ABILITY_DIVINE_LANYARD',
+    name: 'Successful scan',
+    category: 'DEFENSIVE',
+    action: 'Block the first incoming damage.',
+    description: 'Block the first incoming damage.',
+    trigger: 'ON_DEPLOY',
+    effectType: 'BUFF_STAT'
+  },
+  {
+    id: 'ABILITY_HEAVY_FLIGHT_CASE',
+    name: 'Rapid Return',
+    category: 'DEFENSIVE',
+    action: 'Return damage to an attacker.',
+    description: 'Whenever this character takes damage, deal 1 damage to the attacker.',
+    trigger: 'ON_DAMAGE_TAKEN',
+    effectType: 'DAMAGE'
+  },
+  {
+    id: 'ABILITY_CAGE_LOCKDOWN',
+    name: 'Timmy Run',
+    category: 'DEFENSIVE',
+    action: 'Temporarily increase friendly characters\' Health.',
+    description: 'Give all friendly characters +2 Stamina this turn.',
+    trigger: 'ON_DEPLOY',
+    effectType: 'BUFF_STAT'
+  },
+  {
+    id: 'ABILITY_AUDIT_IMMUNITY',
+    name: 'Inventory Check',
+    category: 'DEFENSIVE',
+    action: 'Protect a character from targeted opposing abilities.',
+    description: 'Protect a character from targeted opposing abilities.',
+    trigger: 'ON_DEPLOY',
+    effectType: 'BUFF_STAT'
+  },
+  {
+    id: 'ABILITY_COFFEE_BREAK',
+    name: 'Red bull',
+    category: 'DEFENSIVE',
+    action: 'Recover Health at the beginning of a Shift if undamaged.',
+    description: 'Recover Health at the beginning of a Shift if undamaged.',
+    trigger: 'START_OF_SHIFT',
+    effectType: 'HEAL_STAMINA'
+  },
+
+  // SUPPORT ABILITIES
+  {
+    id: 'ABILITY_GAFFER_TAPE_PATCH',
+    name: 'Gaffer Tape Patch',
+    category: 'SUPPORT',
+    action: 'Restore Health to a friendly character.',
+    description: 'Restore 3 Stamina to target friendly character.',
+    trigger: 'ON_DEPLOY',
+    effectType: 'HEAL_STAMINA'
+  },
+  {
+    id: 'ABILITY_FIELD_PROMOTION',
+    name: 'Extra Pin',
+    category: 'SUPPORT',
+    action: 'Permanently improve a friendly character\'s attributes.',
+    description: 'Give a friendly character +1/+1.',
+    trigger: 'ON_DEPLOY',
+    effectType: 'BUFF_STAT'
+  },
+  {
+    id: 'ABILITY_BENCH_TEST',
+    name: 'Troubleshooting',
+    category: 'SUPPORT',
+    action: 'Improve a random friendly character.',
+    description: 'Give a random friendly character +1/+1 at the start of your shift.',
+    trigger: 'START_OF_SHIFT',
+    effectType: 'BUFF_STAT'
+  },
+  {
+    id: 'ABILITY_SUPERVISOR_COUNSEL',
+    name: 'Happy Vicky',
+    category: 'SUPPORT',
+    action: 'Restore your Supervisor\'s Morale.',
+    description: 'Restore 4 Morale to your Supervisor.',
+    trigger: 'ON_DEPLOY',
+    effectType: 'HEAL_MORALE'
+  },
+  {
+    id: 'ABILITY_EXPRESS_CHECKOUT',
+    name: 'Express Checkout',
+    category: 'SUPPORT',
+    action: 'Draw an additional card.',
+    description: 'Draw 1 card.',
+    trigger: 'ON_DEPLOY',
+    effectType: 'DRAW_CARDS'
+  },
+  {
+    id: 'ABILITY_FAST_TRACK',
+    name: 'Fast Track',
+    category: 'SUPPORT',
+    action: 'Reduce the remaining time of your own Booking Queue tickets.',
+    description: 'Reduce the countdown of all tickets currently in your Booking Queue by 1 turn.',
+    trigger: 'ON_DEPLOY',
+    effectType: 'DISRUPT_QUEUE'
+  },
+  {
+    id: 'ABILITY_EMERGENCY_FUNDING',
+    name: 'Shift Help',
+    category: 'SUPPORT',
+    action: 'Gain temporary Shift resources.',
+    description: 'Gain 1 temporary Shift Hour this turn.',
+    trigger: 'ON_PLAY',
+    effectType: 'MODIFY_SHIFT'
+  },
+
+  // DISRUPTION ABILITIES
+  {
+    id: 'ABILITY_RESERVATION_HOLD',
+    name: 'Pending Approval',
+    category: 'DISRUPTION',
+    action: 'Delay an opposing Booking Queue ticket.',
+    description: 'Delay target opposing queue ticket by +1 turn.',
+    trigger: 'ON_PLAY',
+    effectType: 'DISRUPT_QUEUE'
+  },
+  {
+    id: 'ABILITY_MANDATORY_REVIEW',
+    name: 'Snow Day',
+    category: 'DISRUPTION',
+    action: 'Return an opposing character to its owner\'s hand.',
+    description: 'Return an opposing character to its owner\'s hand.',
+    trigger: 'ON_PLAY',
+    effectType: 'RETURN_TO_HAND'
+  },
+  {
+    id: 'ABILITY_ROOT_CAUSE_ANALYSIS',
+    name: 'Pin Access Removed',
+    category: 'DISRUPTION',
+    action: 'Remove an opposing character\'s abilities and bonuses.',
+    description: 'Silence target enemy character (removes all abilities and keyword buffs).',
+    trigger: 'ON_DEPLOY',
+    effectType: 'SILENCE_CHARACTER'
+  },
+  {
+    id: 'ABILITY_BUREAUCRATIC_RED_TAPE',
+    name: 'Late Fines',
+    category: 'DISRUPTION',
+    action: 'Make selected opposing actions more expensive.',
+    description: 'Make selected opposing actions more expensive.',
+    trigger: 'START_OF_SHIFT',
+    effectType: 'MODIFY_SHIFT'
+  },
+  {
+    id: 'ABILITY_EXPOSÉ_REPORT',
+    name: 'Boss Dirt',
+    category: 'DISRUPTION',
+    action: 'Reveal opposing information and potentially damage their Supervisor.',
+    description: 'Deal 2 damage to enemy Supervisor.',
+    trigger: 'ON_DEPLOY',
+    effectType: 'DAMAGE'
+  },
+  {
+    id: 'ABILITY_MYSTERY_USB_DRIVE',
+    name: 'Random Spotify Playlist',
+    category: 'DISRUPTION',
+    action: 'Trigger a random beneficial or harmful outcome.',
+    description: 'Trigger a random beneficial or harmful outcome.',
+    trigger: 'ON_DEPLOY',
+    effectType: 'DRAW_CARDS'
+  }
+];
+
+export const OFFICIAL_ABILITY_NAMES = OFFICIAL_ABILITIES_CATALOG.map(a => a.name);
+
+export const LEGACY_TO_OFFICIAL_ABILITY_NAME_MAP: Record<string, string> = {
+  // Legacy internal IDs to official names
+  'ABILITY_SHORT_CIRCUIT': 'Spotify Take over',
+  'ABILITY_WORKAROUND': 'Gear Return',
+  'ABILITY_ROLLING_SOUND': 'Pin Over ride',
+  'ABILITY_HOT_LIGHTS': 'Cap Stone Order',
+  'ABILITY_DISCIPLINARY_DISMISSAL': 'Shift Exchange',
+  'ABILITY_UNATTENDED_RODENT': 'NO shift coverage',
+  'ABILITY_FRONT_DESK_GUARD': 'Staging Order 1',
+  'ABILITY_DIVINE_LANYARD': 'Successful scan',
+  'ABILITY_HEAVY_FLIGHT_CASE': 'Rapid Return',
+  'ABILITY_CAGE_LOCKDOWN': 'Timmy Run',
+  'ABILITY_AUDIT_IMMUNITY': 'Inventory Check',
+  'ABILITY_COFFEE_BREAK': 'Red bull',
+  'ABILITY_GAFFER_TAPE_PATCH': 'Gaffer Tape Patch',
+  'ABILITY_DIRECT_REPAIR': 'Gaffer Tape Patch',
+  'ABILITY_FIELD_PROMOTION': 'Extra Pin',
+  'ABILITY_BENCH_TEST': 'Troubleshooting',
+  'ABILITY_SUPERVISOR_COUNSEL': 'Happy Vicky',
+  'ABILITY_EXPRESS_CHECKOUT': 'Express Checkout',
+  'ABILITY_FAST_TRACK': 'Fast Track',
+  'ABILITY_EMERGENCY_FUNDING': 'Shift Help',
+  'ABILITY_BUDGET_REALLOCATION': 'Shift Help',
+  'ABILITY_RESERVATION_HOLD': 'Pending Approval',
+  'ABILITY_MANDATORY_REVIEW': 'Snow Day',
+  'ABILITY_ROOT_CAUSE_ANALYSIS': 'Pin Access Removed',
+  'ABILITY_BUREAUCRATIC_RED_TAPE': 'Late Fines',
+  'ABILITY_EXPOSÉ_REPORT': 'Boss Dirt',
+  'ABILITY_MYSTERY_USB_DRIVE': 'Random Spotify Playlist',
+
+  // Legacy display names to official names
+  'Short Circuit': 'Spotify Take over',
+  'Workaround': 'Gear Return',
+  'Rolling Sound': 'Pin Over ride',
+  'Hot Lights': 'Cap Stone Order',
+  'Disciplinary Dismissal': 'Shift Exchange',
+  'Unattended Rodent': 'NO shift coverage',
+  'Front Desk Guard': 'Staging Order 1',
+  'Divine Lanyard': 'Successful scan',
+  'Heavy Flight Case': 'Rapid Return',
+  'Cage Lockdown': 'Timmy Run',
+  'Audit Immunity': 'Inventory Check',
+  'Coffee Break': 'Red bull',
+  'Direct Repair': 'Gaffer Tape Patch',
+  'Emergency Patch': 'Gaffer Tape Patch',
+  'Emergency Solder': 'Gaffer Tape Patch',
+  'Field Promotion': 'Extra Pin',
+  'Bench Test': 'Troubleshooting',
+  'Supervisor Counsel': 'Happy Vicky',
+  'Emergency Funding': 'Shift Help',
+  'Budget Reallocation': 'Shift Help',
+  'Reservation Hold': 'Pending Approval',
+  'Mandatory Review': 'Snow Day',
+  'Root Cause Analysis': 'Pin Access Removed',
+  'Phantom Power 48V': 'Pin Access Removed',
+  'Bureaucratic Red Tape': 'Late Fines',
+  'Late Fee Sentence': 'Late Fines',
+  'Strict Check-In Policy': 'Late Fines',
+  'Exposé Report': 'Boss Dirt',
+  'Mystery USB Drive': 'Random Spotify Playlist',
+  'Over-Under Coil': 'Fast Track',
+  'Thermal Shutdown': 'Cap Stone Order',
+  'Auditorium Blackout': 'Cap Stone Order',
+  'Emergency Binding': 'Staging Order 1',
+  'Triple Reinforced': 'Staging Order 1',
+  'Syllabus Revision': 'Rapid Return'
+};
+
+/**
+ * Resolves any legacy ability name or abilityId into its new official canonical player-facing name.
+ */
+export function getOfficialAbilityName(nameOrId: string): string {
+  if (!nameOrId) return '';
+  const trimmed = nameOrId.trim();
+
+  // If already an official name
+  if (OFFICIAL_ABILITY_NAMES.includes(trimmed)) {
+    return trimmed;
+  }
+
+  // Exact match in map
+  if (LEGACY_TO_OFFICIAL_ABILITY_NAME_MAP[trimmed]) {
+    return LEGACY_TO_OFFICIAL_ABILITY_NAME_MAP[trimmed];
+  }
+
+  // Check catalog definition
+  if (CANONICAL_ABILITY_CATALOG[trimmed]) {
+    return CANONICAL_ABILITY_CATALOG[trimmed].name;
+  }
+
+  // Case-insensitive match in map
+  const lower = trimmed.toLowerCase();
+  for (const [key, val] of Object.entries(LEGACY_TO_OFFICIAL_ABILITY_NAME_MAP)) {
+    if (key.toLowerCase() === lower) {
+      return val;
+    }
+  }
+
+  // Case-insensitive match in official names
+  for (const off of OFFICIAL_ABILITY_NAMES) {
+    if (off.toLowerCase() === lower) {
+      return off;
+    }
+  }
+
+  return trimmed;
+}
 
 // ============================================================================
 // 3. TARGETING & VALIDATION PIPELINE

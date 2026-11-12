@@ -38,78 +38,89 @@ To guarantee deterministic execution and absolute prevention of game crashes or 
 
 ---
 
-### 3. STANDARDIZED CORE ABILITIES CATALOG
-Here are 24 balanced canonical ability presets ready for engine implementation:
+### 3. OFFICIAL 25 CANONICAL ABILITIES CATALOG & MAPPING
 
-#### A. Booking Specialist Department
-1. **`ABILITY_FAST_TRACK` (Onboarding):**
-   - *Text:* Reduce the countdown of all tickets currently in your Booking Queue by 1 turn.
-   - *Payload:* `EffectType: DISRUPT_QUEUE`, `Value: -1`, `Target: ALL_FRIENDLY_QUEUE`.
-2. **`ABILITY_RESERVATION_HOLD` (Activated - 2 Shift):**
-   - *Text:* Delay target opposing queue ticket by +1 turn.
-   - *Payload:* `EffectType: DISRUPT_QUEUE`, `Value: +1`, `Target: PENDING_QUEUE_TICKET`.
-3. **`ABILITY_EXPRESS_CHECKOUT` (Onboarding):**
-   - *Text:* Draw 1 card. If you control another Booking Specialist, draw 2 cards instead.
-   - *Payload:* `EffectType: DRAW_CARDS`, `Value: 1` (conditional `2`).
+The 25 official player-facing ability names mapped to their canonical internal engine definitions:
 
-#### B. Technician Department
-4. **`ABILITY_GAFFER_TAPE_PATCH` (Onboarding):**
-   - *Text:* Restore 3 Stamina to target damaged character or friendly Supervisor.
-   - *Payload:* `EffectType: HEAL_STAMINA`, `Value: 3`, `Target: ANY_FRIENDLY_CHARACTER`.
-5. **`ABILITY_SHORT_CIRCUIT` (Incident Effect):**
-   - *Text:* Deal 3 damage to an enemy character. If it has Equipment, destroy that Equipment.
-   - *Payload:* `EffectType: DAMAGE`, `Value: 3`, `Target: ANY_ENEMY_CHARACTER`.
-6. **`ABILITY_BENCH_TEST` (Start of Shift):**
-   - *Text:* Give a random friendly character with Equipment +1/+1.
-   - *Payload:* `EffectType: BUFF_STAT`, `Value: 1`, `Target: RANDOM_FRIENDLY_CHARACTER`.
+#### A. Offensive Abilities
+1. **`ABILITY_SHORT_CIRCUIT` — Official Name: `Spotify Take over`**
+   - *Action:* Deal damage to an opposing character.
+   - *Payload:* `EffectType: DAMAGE`, `PrimaryValue: 3`, `TargetFilter: ANY_ENEMY_CHARACTER`, `Trigger: ON_PLAY`.
+2. **`ABILITY_WORKAROUND` — Official Name: `Gear Return`**
+   - *Action:* Destroy or disable an opposing Gear or Equipment card.
+   - *Payload:* `EffectType: SILENCE_CHARACTER`, `PrimaryValue: 0`, `TargetFilter: ANY_ENEMY_CHARACTER`, `Trigger: ON_PLAY`.
+3. **`ABILITY_ROLLING_SOUND` — Official Name: `Pin Over ride`**
+   - *Action:* Gain additional offensive strength for one turn.
+   - *Payload:* `EffectType: BUFF_STAT`, `PrimaryValue: 1`, `TargetFilter: ALL_FRIENDLY_CHARACTERS`, `Duration: UNTIL_END_OF_TURN`, `Trigger: ON_ATTACK`.
+4. **`ABILITY_HOT_LIGHTS` — Official Name: `Cap Stone Order`**
+   - *Action:* Deal damage to multiple characters.
+   - *Payload:* `EffectType: DAMAGE`, `PrimaryValue: 2`, `TargetFilter: ALL_CHARACTERS`, `Trigger: ON_PLAY`.
+5. **`ABILITY_DISCIPLINARY_DISMISSAL` — Official Name: `Shift Exchange`**
+   - *Action:* Remove an opposing character from the battlefield.
+   - *Payload:* `EffectType: DESTROY_CHARACTER`, `PrimaryValue: 0`, `TargetFilter: ANY_ENEMY_CHARACTER`, `Trigger: ON_PLAY`.
+6. **`ABILITY_UNATTENDED_RODENT` — Official Name: `NO shift coverage`**
+   - *Action:* When this character clocks out, damage a random opponent.
+   - *Payload:* `EffectType: DAMAGE`, `PrimaryValue: 2`, `TargetFilter: RANDOM_ENEMY_CHARACTER`, `Trigger: ON_CLOCK_OUT`.
 
-#### C. Administration Department
-7. **`ABILITY_BUDGET_REALLOCATION` (Incident Effect):**
-   - *Text:* Gain 2 temporary Shift Hours this turn, but reduce your Maximum Shift by 1 next turn.
-   - *Payload:* `EffectType: MODIFY_SHIFT`, `Value: +2`, `SecondaryValue: -1`.
-8. **`ABILITY_BUREAUCRATIC_RED_TAPE` (Policy Aura):**
-   - *Text:* Opponents must pay 1 additional Shift Hour to cast Incident cards.
-   - *Payload:* `EffectType: STATIC_AURA`, `RuleModification: INCIDENT_TAX`.
-9. **`ABILITY_MANDATORY_REVIEW` (Onboarding):**
-   - *Text:* Return an opposing Character with 3 or less Power to its owner's hand.
-   - *Payload:* `EffectType: RETURN_TO_HAND`, `Target: ANY_ENEMY_CHARACTER`.
+#### B. Defensive Abilities
+7. **`ABILITY_FRONT_DESK_GUARD` — Official Name: `Staging Order 1`**
+   - *Action:* Opponents must deal with this character before attacking protected teammates.
+   - *Payload:* `EffectType: BUFF_STAT`, `PrimaryValue: 0`, `TargetFilter: SELF`, `Trigger: START_OF_SHIFT`.
+8. **`ABILITY_DIVINE_LANYARD` — Official Name: `Successful scan`**
+   - *Action:* Block the first incoming damage.
+   - *Payload:* `EffectType: BUFF_STAT`, `PrimaryValue: 0`, `TargetFilter: SELF`, `Trigger: ON_DEPLOY`.
+9. **`ABILITY_HEAVY_FLIGHT_CASE` — Official Name: `Rapid Return`**
+   - *Action:* Return damage to an attacker.
+   - *Payload:* `EffectType: DAMAGE`, `PrimaryValue: 1`, `TargetFilter: ATTACKER`, `Trigger: ON_DAMAGE_TAKEN`.
+10. **`ABILITY_CAGE_LOCKDOWN` — Official Name: `Timmy Run`**
+    - *Action:* Temporarily increase friendly characters' Health.
+    - *Payload:* `EffectType: BUFF_STAT`, `PrimaryValue: 0`, `SecondaryValue: 2`, `TargetFilter: ALL_FRIENDLY_CHARACTERS`, `Duration: UNTIL_END_OF_TURN`, `Trigger: ON_DEPLOY`.
+11. **`ABILITY_AUDIT_IMMUNITY` — Official Name: `Inventory Check`**
+    - *Action:* Protect a character from targeted opposing abilities.
+    - *Payload:* `EffectType: BUFF_STAT`, `PrimaryValue: 0`, `TargetFilter: SELF`, `Trigger: ON_DEPLOY`.
+12. **`ABILITY_COFFEE_BREAK` — Official Name: `Red bull`**
+    - *Action:* Recover Health at the beginning of a Shift if undamaged.
+    - *Payload:* `EffectType: HEAL_STAMINA`, `PrimaryValue: 2`, `TargetFilter: SELF`, `Trigger: START_OF_SHIFT`.
 
-#### D. Equipment Specialist Department
-10. **`ABILITY_HEAVY_FLIGHT_CASE` (Front Desk Guard):**
-    - *Text:* Front Desk Guard. Whenever this character takes damage, deal 1 damage to the attacker.
-    - *Payload:* `Trigger: ON_DAMAGE_TAKEN`, `EffectType: DAMAGE`, `Value: 1`, `Target: ATTACKER`.
-11. **`ABILITY_CAGE_LOCKDOWN` (Incident Effect):**
-    - *Text:* Give all friendly characters +2 Stamina and Front Desk Guard this turn.
-    - *Payload:* `EffectType: BUFF_STAT`, `Value: 2`, `Target: ALL_FRIENDLY_CHARACTERS`.
+#### C. Support Abilities
+13. **`ABILITY_GAFFER_TAPE_PATCH` (also `ABILITY_DIRECT_REPAIR`) — Official Name: `Gaffer Tape Patch`**
+    - *Action:* Restore Health to a friendly character.
+    - *Payload:* `EffectType: HEAL_STAMINA`, `PrimaryValue: 3`, `TargetFilter: ANY_FRIENDLY_CHARACTER`, `Trigger: ON_DEPLOY`.
+14. **`ABILITY_FIELD_PROMOTION` — Official Name: `Extra Pin`**
+    - *Action:* Permanently improve a friendly character's attributes.
+    - *Payload:* `EffectType: BUFF_STAT`, `PrimaryValue: 1`, `SecondaryValue: 1`, `Duration: PERMANENT`, `TargetFilter: ANY_FRIENDLY_CHARACTER`, `Trigger: ON_DEPLOY`.
+15. **`ABILITY_BENCH_TEST` — Official Name: `Troubleshooting`**
+    - *Action:* Improve a random friendly character.
+    - *Payload:* `EffectType: BUFF_STAT`, `PrimaryValue: 1`, `SecondaryValue: 1`, `Duration: PERMANENT`, `TargetFilter: RANDOM_FRIENDLY_CHARACTER`, `Trigger: START_OF_SHIFT`.
+16. **`ABILITY_SUPERVISOR_COUNSEL` — Official Name: `Happy Vicky`**
+    - *Action:* Restore your Supervisor's Morale.
+    - *Payload:* `EffectType: HEAL_MORALE`, `PrimaryValue: 4`, `TargetFilter: FRIENDLY_SUPERVISOR`, `Trigger: ON_DEPLOY`.
+17. **`ABILITY_EXPRESS_CHECKOUT` — Official Name: `Express Checkout`**
+    - *Action:* Draw an additional card.
+    - *Payload:* `EffectType: DRAW_CARDS`, `PrimaryValue: 1`, `TargetFilter: SELF`, `Trigger: ON_DEPLOY`.
+18. **`ABILITY_FAST_TRACK` — Official Name: `Fast Track`**
+    - *Action:* Reduce the remaining time of your own Booking Queue tickets.
+    - *Payload:* `EffectType: DISRUPT_QUEUE`, `PrimaryValue: -1`, `TargetFilter: ALL_FRIENDLY_QUEUE`, `Trigger: ON_DEPLOY`.
+19. **`ABILITY_EMERGENCY_FUNDING` (also `ABILITY_BUDGET_REALLOCATION`) — Official Name: `Shift Help`**
+    - *Action:* Gain temporary Shift resources.
+    - *Payload:* `EffectType: MODIFY_SHIFT`, `PrimaryValue: 1`, `TargetFilter: SELF`, `Trigger: ON_PLAY`.
 
-#### E. Journalism Department
-12. **`ABILITY_EXPOSÉ_REPORT` (Onboarding):**
-    - *Text:* Reveal 2 random cards from the opponent's hand. Deal 2 damage to enemy Supervisor.
-    - *Payload:* `EffectType: DAMAGE`, `Value: 2`, `Target: ENEMY_SUPERVISOR`.
-13. **`ABILITY_PRESS_CREDENTIAL` (Equipment):**
-    - *Text:* Equipped character gains +1 Influence and cannot be targeted by enemy Incidents.
-    - *Payload:* `KeywordFlags: { auditImmunity: true }`, `InfluenceBonus: +1`.
-
-#### F. Production Department
-14. **`ABILITY_ROLLING_SOUND` (Rush):**
-    - *Text:* Rush. Whenever this character attacks, friendly characters gain +1 Power this turn.
-    - *Payload:* `Trigger: ON_ATTACK`, `EffectType: BUFF_STAT`, `Value: 1`, `Target: ALL_FRIENDLY_CHARACTERS`.
-15. **`ABILITY_HOT_LIGHTS` (Incident Effect):**
-    - *Text:* Deal 2 damage to ALL characters on the battlefield.
-    - *Payload:* `EffectType: DAMAGE`, `Value: 2`, `Target: ALL_CHARACTERS`.
-
-#### G. Problem Solver Department
-16. **`ABILITY_ROOT_CAUSE_ANALYSIS` (Onboarding):**
-    - *Text:* Silence target character (removes all buffs, debuffs, and card text).
-    - *Payload:* `EffectType: SILENCE_CHARACTER`, `Target: ANY_TARGET`.
-17. **`ABILITY_WORKAROUND` (Incident Effect):**
-    - *Text:* Destroy target Equipment. Draw 1 card.
-    - *Payload:* `EffectType: DESTROY_EQUIPMENT`, `SecondaryEffect: DRAW_CARDS`.
-
-#### H. Chaos Agent Department
-18. **`ABILITY_UNATTENDED_RODENT` (Clock Out):**
-    - *Text:* When this character clocks out, deal 3 damage split randomly among all enemies.
-    - *Payload:* `Trigger: ON_CLOCK_OUT`, `EffectType: DAMAGE`, `Value: 3`, `Target: RANDOM_ENEMY`.
-19. **`ABILITY_MYSTERY_USB_DRIVE` (Onboarding):**
-    - *Text:* 50% chance to draw 2 cards; 50% chance to take 3 Morale damage.
-    - *Payload:* `EffectType: CHAOS_ROLL`, `Options: [DRAW_2, MORALE_DAMAGE_3]`.
+#### D. Disruption Abilities
+20. **`ABILITY_RESERVATION_HOLD` — Official Name: `Pending Approval`**
+    - *Action:* Delay an opposing Booking Queue ticket.
+    - *Payload:* `EffectType: DISRUPT_QUEUE`, `PrimaryValue: 1`, `TargetFilter: PENDING_QUEUE_TICKET`, `Trigger: ON_PLAY`.
+21. **`ABILITY_MANDATORY_REVIEW` — Official Name: `Snow Day`**
+    - *Action:* Return an opposing character to its owner's hand.
+    - *Payload:* `EffectType: RETURN_TO_HAND`, `PrimaryValue: 0`, `TargetFilter: ANY_ENEMY_CHARACTER`, `Trigger: ON_PLAY`.
+22. **`ABILITY_ROOT_CAUSE_ANALYSIS` — Official Name: `Pin Access Removed`**
+    - *Action:* Remove an opposing character's abilities and bonuses.
+    - *Payload:* `EffectType: SILENCE_CHARACTER`, `PrimaryValue: 0`, `TargetFilter: ANY_ENEMY_CHARACTER`, `Trigger: ON_DEPLOY`.
+23. **`ABILITY_BUREAUCRATIC_RED_TAPE` — Official Name: `Late Fines`**
+    - *Action:* Make selected opposing actions more expensive.
+    - *Payload:* `EffectType: MODIFY_SHIFT`, `PrimaryValue: 0`, `TargetFilter: SELF`, `Trigger: START_OF_SHIFT`.
+24. **`ABILITY_EXPOSÉ_REPORT` — Official Name: `Boss Dirt`**
+    - *Action:* Reveal opposing information and potentially damage their Supervisor.
+    - *Payload:* `EffectType: DAMAGE`, `PrimaryValue: 2`, `TargetFilter: ENEMY_SUPERVISOR`, `Trigger: ON_DEPLOY`.
+25. **`ABILITY_MYSTERY_USB_DRIVE` — Official Name: `Random Spotify Playlist`**
+    - *Action:* Trigger a random beneficial or harmful outcome.
+    - *Payload:* `EffectType: DRAW_CARDS`, `PrimaryValue: 1`, `TargetFilter: SELF`, `Trigger: ON_DEPLOY`.
