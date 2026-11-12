@@ -124,3 +124,42 @@ The 25 official player-facing ability names mapped to their canonical internal e
 25. **`ABILITY_MYSTERY_USB_DRIVE` — Official Name: `Random Spotify Playlist`**
     - *Action:* Trigger a random beneficial or harmful outcome.
     - *Payload:* `EffectType: DRAW_CARDS`, `PrimaryValue: 1`, `TargetFilter: SELF`, `Trigger: ON_DEPLOY`.
+
+---
+
+### 4. IMPLEMENTATION STATUS & DOCUMENTED MECHANICAL LIMITATIONS
+
+Per the Official Ability Renaming Approval, player-facing names and stable internal IDs are finalized across all 25 canonical abilities. In order to preserve engine stability and card balance, no new gameplay mechanics were introduced in this naming milestone. The following 8 abilities have documented mechanical limitations in the current simulation engine and will be addressed in a future dedicated gameplay milestone:
+
+1. **Gear Return (`ABILITY_WORKAROUND`)**
+   - *Official Action:* Destroy or disable an opposing Gear or Equipment card.
+   - *Current Engine Limitation:* The current simulation engine does not support equipment attachment slots on battlefield characters or a `DESTROY_EQUIPMENT` effect type. It currently executes `SILENCE_CHARACTER` against `ANY_ENEMY_CHARACTER`.
+
+2. **Cap Stone Order (`ABILITY_HOT_LIGHTS`)**
+   - *Official Action:* Deal damage to multiple characters.
+   - *Current Engine Limitation:* In `resolveAbilityEffect`, the `DAMAGE` handler supports single targets (character or supervisor). An `ALL_CHARACTERS` multi-target iteration loop is not yet implemented in the resolution pipeline.
+
+3. **Successful scan (`ABILITY_DIVINE_LANYARD`)**
+   - *Official Action:* Block the first incoming damage.
+   - *Current Engine Limitation:* The engine lacks an active damage-nullification/shield state in `combat.ts`. Damage calculations do not currently check or consume a `Divine Shield` charge.
+
+4. **Inventory Check (`ABILITY_AUDIT_IMMUNITY`)**
+   - *Official Action:* Protect a character from targeted opposing abilities.
+   - *Current Engine Limitation:* The engine does not yet evaluate an untargetable / spell-ward flag within `isTargetLegal` when resolving enemy abilities or incident targeting.
+
+5. **Red bull (`ABILITY_COFFEE_BREAK`)**
+   - *Official Action:* Recover Health at the beginning of a Shift if undamaged.
+   - *Current Engine Limitation:* Restores 2 Stamina at the start of shift unconditionally. The engine does not yet track a "damaged this round / prior turn" history flag on character cards.
+
+6. **Late Fines (`ABILITY_BUREAUCRATIC_RED_TAPE`)**
+   - *Official Action:* Make selected opposing actions more expensive.
+   - *Current Engine Limitation:* Resolves `MODIFY_SHIFT` with value 0. The engine does not yet support an ongoing cost-taxing aura or incident cost modifier pipeline.
+
+7. **Boss Dirt (`ABILITY_EXPOSÉ_REPORT`)**
+   - *Official Action:* Reveal opposing information and potentially damage their Supervisor.
+   - *Current Engine Limitation:* Resolves 2 damage to the enemy supervisor, but the engine currently lacks hand-inspection and hidden-information reveal mechanics.
+
+8. **Random Spotify Playlist (`ABILITY_MYSTERY_USB_DRIVE`)**
+   - *Official Action:* Trigger a random beneficial or harmful outcome.
+   - *Current Engine Limitation:* Currently resolves as `DRAW_CARDS` (1 card). A dual-outcome beneficial/harmful random table roll has not yet been hooked into the engine resolution pipeline.
+
