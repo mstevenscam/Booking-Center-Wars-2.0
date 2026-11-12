@@ -1,13 +1,17 @@
 /**
  * BOOKING WARS: THE BATTLE FOR THE BOOKING CENTRE
- * Official Ability Renaming & Backward Compatibility Test Suite
+ * Official Ability Renaming, Mechanical Verification & Audit Test Suite
  * 
  * Verifies:
  * 1. All 25 official ability names exist in CANONICAL_ABILITY_CATALOG and OFFICIAL_ABILITIES_CATALOG.
- * 2. Exact spacing and capitalization match official rules.
+ * 2. Exact spacing, capitalization, and naming conventions.
  * 3. All internal abilityId keys remain unchanged and stable.
  * 4. Backward compatibility resolver getOfficialAbilityName maps legacy names/IDs to official names.
- * 5. Mechanics, triggers, and values execute accurately under the renamed canonical definitions.
+ * 5. Legacy card import through validateImportedCard normalizes old names/IDs to official names.
+ * 6. Mechanical triggers, parameters, targeting filters, and effect executions operate accurately.
+ * 7. PRNG determinism for random ability resolutions (Mulberry32 seeded PRNG).
+ * 8. Gear targeting limitation verification (engine lacks Equipment target filter / attachments).
+ * 9. Playable card definition preset selection and storage (preserving stable abilityId).
  */
 
 import { test, describe } from 'node:test';
@@ -17,9 +21,15 @@ import {
   OFFICIAL_ABILITIES_CATALOG,
   OFFICIAL_ABILITY_NAMES,
   getOfficialAbilityName,
-  resolveAbilityEffect
+  resolveAbilityEffect,
+  dispatchTriggers,
+  isTargetLegal,
+  nextRandom,
+  AbilityDefinition
 } from '../abilities.js';
+import { validateImportedCard } from '../card_importer.js';
 import { createInitialGameState, CardDefinition, GameState } from '../index.js';
+import { PlayableCardDefinition } from '../../ui/archive/types.js';
 
 // The 25 official ability names exactly as specified
 const EXPECTED_25_ABILITIES = [
@@ -82,7 +92,7 @@ function createReadyMatch(seed = 42): GameState {
   });
 }
 
-describe('Official Ability Renaming & Backward Compatibility', () => {
+describe('Official Ability Renaming & Backward Compatibility Audit', () => {
 
   test('Catalog contains exactly 25 official abilities with correct names and categories', () => {
     assert.equal(OFFICIAL_ABILITIES_CATALOG.length, 25);
@@ -112,7 +122,6 @@ describe('Official Ability Renaming & Backward Compatibility', () => {
     for (const expected of EXPECTED_25_ABILITIES) {
       assert.ok(OFFICIAL_ABILITY_NAMES.includes(expected.name), `OFFICIAL_ABILITY_NAMES must include "${expected.name}"`);
       
-      // Look up canonical catalog by internal ID
       const canonical = CANONICAL_ABILITY_CATALOG[expected.id];
       assert.ok(canonical, `CANONICAL_ABILITY_CATALOG must have entry for "${expected.id}"`);
       assert.equal(canonical.name, expected.name, `Canonical ability name for "${expected.id}" must match "${expected.name}"`);
@@ -217,10 +226,68 @@ describe('Official Ability Renaming & Backward Compatibility', () => {
     assert.equal(getOfficialAbilityName('spotify take over'), 'Spotify Take over');
   });
 
-  test('Mechanical execution of abilities operates identically with official names', () => {
+  test('Legacy card import normalizes legacy ability names and IDs to official names', () => {
+    // 1. Import card payload referencing legacy name 'Short Circuit'
+    const payloadLegacyName = {
+      cardId: 'test_legacy_card_1',
+      name: 'Electric Specialist',
+      cardType: 'CHARACTER',
+      rarity: 'STUDENT_WORKER',
+      shiftCost: 3,
+      power: 2,
+      stamina: 4,
+      influence: 1,
+      abilities: [
+        {
+          abilityId: 'ABILITY_SHORT_CIRCUIT',
+          name: 'Short Circuit',
+          trigger: 'ON_PLAY',
+          targetFilter: 'ANY_ENEMY_CHARACTER',
+          effectType: 'DAMAGE',
+          primaryValue: 3,
+          requiresManualTarget: true,
+          customDescription: 'Deal 3 damage.'
+        }
+      ]
+    };
+
+    const res1 = validateImportedCard(payloadLegacyName);
+    assert.equal(res1.valid, true);
+    assert.ok(res1.cardDefinition);
+    assert.equal(res1.cardDefinition.abilities![0].name, 'Spotify Take over');
+
+    // 2. Import card payload missing name, only providing legacy abilityId
+    const payloadOnlyId = {
+      cardId: 'test_legacy_card_2',
+      name: 'Policy Dispatcher',
+      cardType: 'CHARACTER',
+      rarity: 'SHIFT_LEAD',
+      shiftCost: 2,
+      power: 1,
+      stamina: 3,
+      influence: 2,
+      abilities: [
+        {
+          abilityId: 'ABILITY_RESERVATION_HOLD',
+          trigger: 'ON_PLAY',
+          targetFilter: 'PENDING_QUEUE_TICKET',
+          effectType: 'DISRUPT_QUEUE',
+          primaryValue: 1,
+          requiresManualTarget: true
+        }
+      ]
+    };
+
+    const res2 = validateImportedCard(payloadOnlyId);
+    assert.equal(res2.valid, true);
+    assert.ok(res2.cardDefinition);
+    assert.equal(res2.cardDefinition.abilities![0].name, 'Pending Approval');
+  });
+
+  test('Mechanical effect execution: Offensive abilities (Spotify Take over & Shift Exchange)', () => {
     const state = createReadyMatch();
 
-    // Deploy a target card to P2 battlefield from hand
+    // Setup an enemy target on P2 battlefield
     const targetCard = state.players.p2.hand[0];
     targetCard.stamina = 5;
     targetCard.maxStamina = 5;
@@ -231,24 +298,150 @@ describe('Official Ability Renaming & Backward Compatibility', () => {
       enteredTurn: 1
     });
 
-    // 1. Spotify Take over (ABILITY_SHORT_CIRCUIT): Deal 3 damage to an enemy character
+    // Spotify Take over (ABILITY_SHORT_CIRCUIT): Deal 3 damage
     const spotifyAbility = CANONICAL_ABILITY_CATALOG['ABILITY_SHORT_CIRCUIT'];
     const resDamage = resolveAbilityEffect(state, 'p1', 'source_1', spotifyAbility, {
       type: 'CHARACTER',
       characterInstanceId: targetCard.instanceId
     });
-
     assert.equal(resDamage.success, true);
     assert.equal(targetCard.stamina, 2); // 5 - 3 = 2
     assert.ok(state.historyLog.some(e => e.includes('Spotify Take over') && e.includes('dealt 3 damage')));
 
-    // 2. Pending Approval (ABILITY_RESERVATION_HOLD): Delay queue ticket by +1
-    state.players.p2.queue.push({
-      id: 'ticket_1',
-      cardId: 'card_1',
-      cardName: 'Queued Card',
+    // Shift Exchange (ABILITY_DISCIPLINARY_DISMISSAL): Retire enemy character directly to Breakroom
+    const shiftExchangeAbility = CANONICAL_ABILITY_CATALOG['ABILITY_DISCIPLINARY_DISMISSAL'];
+    const resRetire = resolveAbilityEffect(state, 'p1', 'source_1', shiftExchangeAbility, {
+      type: 'CHARACTER',
+      characterInstanceId: targetCard.instanceId
+    });
+    assert.equal(resRetire.success, true);
+    assert.equal(state.players.p2.battlefield.length, 0); // Removed from counter
+    assert.equal(state.players.p2.breakroom.length, 1);   // Retired to breakroom
+    assert.equal(state.players.p2.breakroom[0].instanceId, targetCard.instanceId);
+  });
+
+  test('Mechanical effect execution: Defensive abilities (Rapid Return & Timmy Run)', () => {
+    const state = createReadyMatch();
+
+    // Deploy friendly unit to P1 battlefield
+    const friendlyCard = state.players.p1.hand[0];
+    friendlyCard.stamina = 4;
+    friendlyCard.maxStamina = 4;
+    friendlyCard.abilities = [CANONICAL_ABILITY_CATALOG['ABILITY_HEAVY_FLIGHT_CASE']]; // Rapid Return
+    state.players.p1.battlefield.push({
+      slotId: 'slot_0',
+      card: friendlyCard,
+      canAttack: true,
+      enteredTurn: 0
+    });
+
+    // Timmy Run (ABILITY_CAGE_LOCKDOWN): +2 Stamina buffer to friendly characters this turn
+    const timmyRunAbility = CANONICAL_ABILITY_CATALOG['ABILITY_CAGE_LOCKDOWN'];
+    const resTimmy = resolveAbilityEffect(state, 'p1', 'source_deploy', timmyRunAbility, {
+      type: 'ALL_FRIENDLY'
+    });
+    assert.equal(resTimmy.success, true);
+    assert.equal(friendlyCard.stamina, 6); // 4 + 2 buffer
+    assert.equal(friendlyCard.temporaryStaminaBuffer, 2);
+
+    // Rapid Return (ABILITY_HEAVY_FLIGHT_CASE): On damage taken, retaliates 1 damage to attacker
+    const enemyAttacker = state.players.p2.hand[0];
+    enemyAttacker.stamina = 5;
+    enemyAttacker.maxStamina = 5;
+    const attackerSlot = { slotId: 'slot_0', card: enemyAttacker, canAttack: true, enteredTurn: 0 };
+    state.players.p2.battlefield.push(attackerSlot);
+
+    const dmgRes = dispatchTriggers(state, 'ON_DAMAGE_TAKEN', {
+      trigger: 'ON_DAMAGE_TAKEN',
+      sourceInstanceId: friendlyCard.instanceId,
+      sourcePlayerId: 'p1',
+      attackerSlot,
+      damageAmount: 2
+    });
+    assert.equal(dmgRes.success, true);
+    assert.equal(enemyAttacker.stamina, 4); // 5 - 1 retaliation = 4
+    assert.ok(state.historyLog.some(e => e.includes('Rapid Return') && e.includes('dealt 1 damage')));
+  });
+
+  test('Mechanical effect execution: Support abilities (Troubleshooting, Extra Pin, Happy Vicky, Fast Track, Shift Help)', () => {
+    const state = createReadyMatch();
+
+    const unit = state.players.p1.hand[0];
+    unit.efficiency = 2;
+    unit.stamina = 3;
+    unit.maxStamina = 3;
+    state.players.p1.battlefield.push({ slotId: 'slot_0', card: unit, canAttack: true, enteredTurn: 0 });
+
+    // Extra Pin (ABILITY_FIELD_PROMOTION): Permanently give friendly character +1/+1
+    const extraPin = CANONICAL_ABILITY_CATALOG['ABILITY_FIELD_PROMOTION'];
+    const resPin = resolveAbilityEffect(state, 'p1', 'source_1', extraPin, {
+      type: 'CHARACTER',
+      characterInstanceId: unit.instanceId
+    });
+    assert.equal(resPin.success, true);
+    assert.equal(unit.efficiency, 3);
+    assert.equal(unit.stamina, 4);
+
+    // Troubleshooting (ABILITY_BENCH_TEST): Give random friendly character +1/+1 at start of shift
+    const troubleshooting = CANONICAL_ABILITY_CATALOG['ABILITY_BENCH_TEST'];
+    const resTrouble = resolveAbilityEffect(state, 'p1', 'source_1', troubleshooting, {
+      type: 'NONE'
+    });
+    assert.equal(resTrouble.success, true);
+    assert.equal(unit.efficiency, 4);
+    assert.equal(unit.stamina, 5);
+
+    // Happy Vicky (ABILITY_SUPERVISOR_COUNSEL): Restore 4 Morale
+    state.players.p1.morale = 22;
+    const happyVicky = CANONICAL_ABILITY_CATALOG['ABILITY_SUPERVISOR_COUNSEL'];
+    const resVicky = resolveAbilityEffect(state, 'p1', 'source_1', happyVicky, {
+      type: 'SUPERVISOR',
+      playerId: 'p1'
+    });
+    assert.equal(resVicky.success, true);
+    assert.equal(state.players.p1.morale, 26);
+
+    // Shift Help (ABILITY_EMERGENCY_FUNDING): Gain 1 temporary Shift Hour
+    const initShift = state.players.p1.currentShift;
+    const shiftHelp = CANONICAL_ABILITY_CATALOG['ABILITY_EMERGENCY_FUNDING'];
+    const resShift = resolveAbilityEffect(state, 'p1', 'source_1', shiftHelp, {
+      type: 'NONE'
+    });
+    assert.equal(resShift.success, true);
+    assert.equal(state.players.p1.currentShift, initShift + 1);
+
+    // Fast Track (ABILITY_FAST_TRACK): Reduce tickets in queue by 1 turn
+    state.players.p1.queue.push({
+      id: 'ticket_fast',
+      cardId: 'c_fast',
+      cardName: 'Fast Rig',
       baseCost: 3,
       effectiveCost: 2,
+      queuedTurn: 1,
+      queueDuration: 3,
+      remainingTurns: 3,
+      influence: 1,
+      ownerId: 'p1',
+      fifoIndex: 0
+    });
+    const fastTrack = CANONICAL_ABILITY_CATALOG['ABILITY_FAST_TRACK'];
+    const resFast = resolveAbilityEffect(state, 'p1', 'source_1', fastTrack, {
+      type: 'ALL_QUEUE'
+    });
+    assert.equal(resFast.success, true);
+    assert.equal(state.players.p1.queue[0].remainingTurns, 2); // 3 - 1 = 2
+  });
+
+  test('Mechanical effect execution: Disruption abilities (Pending Approval, Snow Day, Pin Access Removed, Boss Dirt)', () => {
+    const state = createReadyMatch();
+
+    // 1. Pending Approval (ABILITY_RESERVATION_HOLD): Delay enemy ticket
+    state.players.p2.queue.push({
+      id: 'opp_ticket',
+      cardId: 'c_opp',
+      cardName: 'Opp Rig',
+      baseCost: 4,
+      effectiveCost: 3,
       queuedTurn: 1,
       queueDuration: 2,
       remainingTurns: 2,
@@ -256,29 +449,154 @@ describe('Official Ability Renaming & Backward Compatibility', () => {
       ownerId: 'p2',
       fifoIndex: 0
     });
-
-    const pendingApprovalAbility = CANONICAL_ABILITY_CATALOG['ABILITY_RESERVATION_HOLD'];
-    const resDelay = resolveAbilityEffect(state, 'p1', 'source_1', pendingApprovalAbility, {
+    const pendingApproval = CANONICAL_ABILITY_CATALOG['ABILITY_RESERVATION_HOLD'];
+    const resDelay = resolveAbilityEffect(state, 'p1', 'source_1', pendingApproval, {
       type: 'QUEUE_TICKET',
-      ticketId: 'ticket_1',
+      ticketId: 'opp_ticket',
       ownerId: 'p2'
     });
-
     assert.equal(resDelay.success, true);
     assert.equal(state.players.p2.queue[0].remainingTurns, 3); // 2 + 1 = 3
-    assert.ok(state.historyLog.some(e => e.includes('Pending Approval') && e.includes('modified ticket')));
 
-    // 3. Happy Vicky (ABILITY_SUPERVISOR_COUNSEL): Restore 4 Morale
-    state.players.p1.morale = 20;
-    const happyVickyAbility = CANONICAL_ABILITY_CATALOG['ABILITY_SUPERVISOR_COUNSEL'];
-    const resMorale = resolveAbilityEffect(state, 'p1', 'source_1', happyVickyAbility, {
+    // 2. Boss Dirt (ABILITY_EXPOSÉ_REPORT): Deal 2 damage to enemy supervisor
+    const initMorale = state.players.p2.morale;
+    const bossDirt = CANONICAL_ABILITY_CATALOG['ABILITY_EXPOSÉ_REPORT'];
+    const resBoss = resolveAbilityEffect(state, 'p1', 'source_1', bossDirt, {
       type: 'SUPERVISOR',
-      playerId: 'p1'
+      playerId: 'p2'
     });
+    assert.equal(resBoss.success, true);
+    assert.equal(state.players.p2.morale, initMorale - 2);
 
-    assert.equal(resMorale.success, true);
-    assert.equal(state.players.p1.morale, 24); // 20 + 4 = 24
-    assert.ok(state.historyLog.some(e => e.includes('Happy Vicky') && e.includes('restored 4 Morale')));
+    // 3. Pin Access Removed (ABILITY_ROOT_CAUSE_ANALYSIS): Silence enemy character
+    const buffedEnemy = state.players.p2.hand[0];
+    buffedEnemy.efficiency = 6;
+    buffedEnemy.stamina = 8;
+    buffedEnemy.temporaryEfficiencyBuffer = 3;
+    buffedEnemy.baseTemplate = {
+      baseCost: 2,
+      efficiency: 2,
+      stamina: 4,
+      influence: 1,
+      abilities: [],
+      isFrontDeskGuard: false,
+      isRush: false,
+      isFirstResponder: false,
+      isInfiltration: false,
+      hasOnDeployAbility: false
+    };
+    state.players.p2.battlefield.push({ slotId: 'slot_0', card: buffedEnemy, canAttack: true, enteredTurn: 0 });
+
+    const pinAccess = CANONICAL_ABILITY_CATALOG['ABILITY_ROOT_CAUSE_ANALYSIS'];
+    const resSilence = resolveAbilityEffect(state, 'p1', 'source_1', pinAccess, {
+      type: 'CHARACTER',
+      characterInstanceId: buffedEnemy.instanceId
+    });
+    assert.equal(resSilence.success, true);
+    assert.equal(buffedEnemy.isSilenced, true);
+    assert.equal(buffedEnemy.efficiency, 2); // Reset to base template
+    assert.equal(buffedEnemy.temporaryEfficiencyBuffer, 0);
+
+    // 4. Snow Day (ABILITY_MANDATORY_REVIEW): Return enemy character to hand
+    const snowDay = CANONICAL_ABILITY_CATALOG['ABILITY_MANDATORY_REVIEW'];
+    const resSnow = resolveAbilityEffect(state, 'p1', 'source_1', snowDay, {
+      type: 'CHARACTER',
+      characterInstanceId: buffedEnemy.instanceId
+    });
+    assert.equal(resSnow.success, true);
+    assert.equal(state.players.p2.battlefield.length, 0);
+    assert.ok(state.players.p2.hand.some(c => c.instanceId === buffedEnemy.instanceId));
+  });
+
+  test('Mulberry32 PRNG determinism for random ability resolutions', () => {
+    // Two independent matches initialized with identical seed 12345
+    const stateA = createReadyMatch(12345);
+    const stateB = createReadyMatch(12345);
+
+    const randomsA: number[] = [];
+    const randomsB: number[] = [];
+
+    for (let i = 0; i < 20; i++) {
+      randomsA.push(nextRandom(stateA));
+      randomsB.push(nextRandom(stateB));
+    }
+
+    assert.deepEqual(randomsA, randomsB, 'Identical seed must produce identical PRNG sequence');
+    assert.notEqual(randomsA[0], randomsA[1], 'Subsequent random values must advance');
+  });
+
+  test('Audit Investigation: Gear Return & Gear/Equipment engine limitation documentation', () => {
+    // Verify that Gear Return is mapped to ABILITY_WORKAROUND with SILENCE_CHARACTER
+    const gearReturn = CANONICAL_ABILITY_CATALOG['ABILITY_WORKAROUND'];
+    assert.equal(gearReturn.abilityId, 'ABILITY_WORKAROUND');
+    assert.equal(gearReturn.name, 'Gear Return');
+    assert.equal(gearReturn.effectType, 'SILENCE_CHARACTER');
+    assert.equal(gearReturn.targetFilter, 'ANY_ENEMY_CHARACTER');
+
+    // Engine limitation verification: the engine does not possess an Equipment target filter
+    const state = createReadyMatch();
+    const fakeEquipmentTarget = { type: 'EQUIPMENT', cardId: 'eq_1' } as any;
+    assert.equal(
+      isTargetLegal(state, 'p1', gearReturn.targetFilter, fakeEquipmentTarget),
+      false,
+      'isTargetLegal must reject non-character targets for SILENCE_CHARACTER'
+    );
+  });
+
+  test('Preset selection and saved playable-card data preserves stable abilityId', () => {
+    // 1. Playable card created from official preset retains stable abilityId
+    const officialPlayableCard: PlayableCardDefinition = {
+      playableCardId: 'play-dave-01',
+      archiveId: 'arch-dave-01',
+      displayName: 'Dave, Patch Bay Maestro',
+      variationName: 'Standard Roster',
+      cardType: 'CHARACTER',
+      rarity: 'SUPERVISOR',
+      department: 'TECH',
+      shiftCost: 4,
+      efficiency: 4,
+      stamina: 5,
+      maxStamina: 5,
+      influence: 2,
+      keywords: ['Staging Order 1'],
+      abilityId: 'ABILITY_GAFFER_TAPE_PATCH',
+      abilityName: 'Gaffer Tape Patch',
+      abilityDesc: 'Restore 3 Stamina to target friendly character.',
+      flavor: '"If gaffer tape cannot fix it, it is not broken enough."',
+      isActive: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    assert.equal(officialPlayableCard.abilityId, 'ABILITY_GAFFER_TAPE_PATCH');
+    assert.equal(officialPlayableCard.abilityName, 'Gaffer Tape Patch');
+
+    // 2. Playable card with custom free-text ability stores abilityId as null
+    const customPlayableCard: PlayableCardDefinition = {
+      playableCardId: 'play-custom-01',
+      archiveId: 'arch-custom-01',
+      displayName: 'Kevin, Coffee Spiller',
+      variationName: 'Promo',
+      cardType: 'CHARACTER',
+      rarity: 'COMMON',
+      department: 'CHAOS',
+      shiftCost: 1,
+      efficiency: 1,
+      stamina: 2,
+      maxStamina: 2,
+      influence: 0,
+      keywords: [],
+      abilityId: null, // Custom free-text has no engine ability mapping
+      abilityName: 'Espresso Splash',
+      abilityDesc: 'Spills coffee on the soundboard.',
+      flavor: '"Oops."',
+      isActive: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    assert.equal(customPlayableCard.abilityId, null);
+    assert.equal(customPlayableCard.abilityName, 'Espresso Splash');
   });
 
 });

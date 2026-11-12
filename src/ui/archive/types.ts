@@ -111,6 +111,7 @@ export interface PlayableCardDefinition {
   maxStamina: number;
   influence: number;                   // Queue and terminal victory points
   keywords: string[];
+  abilityId?: string | null;           // Stable mechanical ID if mapped from official catalog
   abilityName: string | null;
   abilityDesc: string | null;
   flavor: string;

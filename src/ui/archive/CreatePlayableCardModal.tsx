@@ -49,7 +49,8 @@ export const CreatePlayableCardModal: React.FC<CreatePlayableCardModalProps> = (
   const [efficiency, setEfficiency] = useState(3);
   const [stamina, setStamina] = useState(4);
   const [influence, setInfluence] = useState(1);
-  const [keywordsStr, setKeywordsStr] = useState('Front Desk Guard');
+  const [keywordsStr, setKeywordsStr] = useState('Staging Order 1');
+  const [abilityId, setAbilityId] = useState<string | null>(null);
   const [abilityName, setAbilityName] = useState('');
   const [abilityDesc, setAbilityDesc] = useState('');
   const [flavor, setFlavor] = useState('');
@@ -75,6 +76,7 @@ export const CreatePlayableCardModal: React.FC<CreatePlayableCardModalProps> = (
     setStamina(4);
     setInfluence(1);
     setKeywordsStr('');
+    setAbilityId(null);
     setAbilityName('');
     setAbilityDesc('');
     setFlavor(`"Originally scanned from physical card archives (${archiveRecord.originalCreationYear || 'Historical'})."`);
@@ -139,6 +141,7 @@ export const CreatePlayableCardModal: React.FC<CreatePlayableCardModalProps> = (
       maxStamina: cardType === 'CHARACTER' ? stamina : 0,
       influence: cardType === 'CHARACTER' ? influence : 0,
       keywords: keywordsStr.split(',').map(s => s.trim()).filter(Boolean),
+      abilityId: abilityId || null,
       abilityName: abilityName.trim() || null,
       abilityDesc: abilityDesc.trim() || null,
       flavor: flavor.trim() || 'A historical card preserved in the Humber Booking Centre Archive.',
@@ -354,17 +357,18 @@ export const CreatePlayableCardModal: React.FC<CreatePlayableCardModalProps> = (
               {/* Official Ability Preset Selector */}
               <div>
                 <select
-                  defaultValue=""
+                  value={abilityName && OFFICIAL_ABILITIES_CATALOG.some(a => a.name === abilityName) ? abilityName : ""}
                   onChange={(e) => {
                     const preset = OFFICIAL_ABILITIES_CATALOG.find(a => a.name === e.target.value);
                     if (preset) {
+                      setAbilityId(preset.id);
                       setAbilityName(preset.name);
                       setAbilityDesc(preset.description);
                     }
                   }}
                   className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-200 text-xs mb-1"
                 >
-                  <option value="" disabled>Choose Official Ability Preset...</option>
+                  <option value="">{abilityId ? 'Official Preset Selected' : 'Choose Official Ability Preset...'}</option>
                   <optgroup label="Offensive Abilities">
                     {OFFICIAL_ABILITIES_CATALOG.filter(a => a.category === 'OFFENSIVE').map(a => (
                       <option key={a.id} value={a.name}>{a.name} — {a.action}</option>
@@ -388,10 +392,33 @@ export const CreatePlayableCardModal: React.FC<CreatePlayableCardModalProps> = (
                 </select>
               </div>
 
+              {/* Engine Integration Status Badge */}
+              {abilityName.trim() && (
+                <div className="flex items-center justify-between px-2 py-1 rounded bg-slate-900 border border-slate-800 text-[10px]">
+                  <span className="text-slate-400">Engine Integration:</span>
+                  {abilityId ? (
+                    <span className="text-emerald-400 font-mono font-bold flex items-center gap-1">
+                      <Sparkles className="w-3 h-3" /> Linked to {abilityId}
+                    </span>
+                  ) : (
+                    <span className="text-amber-400 italic">
+                      Custom Free-Text (Cosmetic / Archive Only)
+                    </span>
+                  )}
+                </div>
+              )}
+
               <input
                 type="text"
                 value={abilityName}
-                onChange={(e) => setAbilityName(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setAbilityName(val);
+                  const matchingPreset = OFFICIAL_ABILITIES_CATALOG.find(
+                    a => a.name.toLowerCase() === val.trim().toLowerCase()
+                  );
+                  setAbilityId(matchingPreset ? matchingPreset.id : null);
+                }}
                 placeholder="Ability Name (e.g. Gaffer Tape Patch)"
                 className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-slate-200"
               />
